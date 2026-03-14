@@ -291,7 +291,7 @@ function isTelegramRuntime() {
 }
 
 function updateTelegramAuthUi() {
-  telegramAuth?.classList.toggle("is-hidden", !getTelegramWebApp());
+  telegramAuth?.classList.toggle("is-hidden", !isTelegramRuntime());
 }
 
 function isTelegramSession() {
