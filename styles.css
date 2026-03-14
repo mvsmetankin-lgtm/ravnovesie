@@ -540,13 +540,15 @@ button {
 }
 
 .horizontal-scroll {
-  display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: minmax(124px, 124px);
+  display: flex;
   gap: 10px;
   overflow-x: auto;
   padding-bottom: 2px;
   scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: x proximity;
+  touch-action: pan-x;
 }
 
 .horizontal-scroll::-webkit-scrollbar {
@@ -554,6 +556,7 @@ button {
 }
 
 .category-card {
+  flex: 0 0 124px;
   min-height: 148px;
   border-radius: 24px;
   padding: 10px;
@@ -566,6 +569,7 @@ button {
     linear-gradient(135deg, #88cbd8, #7899ff);
   box-shadow: var(--shadow-sm);
   cursor: pointer;
+  scroll-snap-align: start;
 }
 
 .category-card img,
@@ -645,12 +649,14 @@ button {
 }
 
 .cards-row {
-  display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: minmax(280px, 280px);
+  display: flex;
   gap: 12px;
   overflow-x: auto;
   scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: x proximity;
+  touch-action: pan-x;
 }
 
 .cards-row::-webkit-scrollbar {
@@ -658,6 +664,7 @@ button {
 }
 
 .practice-card {
+  flex: 0 0 280px;
   min-height: 118px;
   border-radius: 22px;
   padding: 12px;
@@ -667,6 +674,7 @@ button {
   background: var(--surface);
   box-shadow: var(--shadow-md);
   min-width: 0;
+  scroll-snap-align: start;
 }
 
 .media-thumb {
@@ -1365,15 +1373,20 @@ button {
   }
 
   .horizontal-scroll {
-    grid-auto-columns: minmax(94px, 94px);
+    gap: 8px;
   }
 
   .category-card {
+    flex-basis: 94px;
     min-height: 116px;
   }
 
   .cards-row {
-    grid-auto-columns: minmax(232px, 232px);
+    gap: 10px;
+  }
+
+  .practice-card {
+    flex-basis: 232px;
   }
 
   .banner-card {
@@ -1498,11 +1511,11 @@ button {
   }
 
   .horizontal-scroll {
-    grid-auto-columns: 108px;
     gap: 8px;
   }
 
   .category-card {
+    flex-basis: 108px;
     min-height: 128px;
     border-radius: 22px;
     padding: 10px;
@@ -1532,11 +1545,11 @@ button {
   }
 
   .cards-row {
-    grid-auto-columns: minmax(232px, 84vw);
     gap: 10px;
   }
 
   .practice-card {
+    flex-basis: min(232px, 84vw);
     grid-template-columns: 88px minmax(0, 1fr);
     min-height: 112px;
   }
