@@ -1365,7 +1365,7 @@ button {
 
   .phone-shell {
     min-height: 844px;
-    padding: 18px 14px 116px;
+    padding: 18px 14px calc(116px + env(safe-area-inset-bottom, 0px));
   }
 
   .app-content {
@@ -1394,10 +1394,11 @@ button {
   }
 
   .bottom-nav {
-    position: absolute;
-    left: 14px;
-    right: 14px;
-    bottom: 14px;
+    position: fixed;
+    left: max(14px, env(safe-area-inset-left, 0px));
+    right: max(14px, env(safe-area-inset-right, 0px));
+    bottom: max(14px, env(safe-area-inset-bottom, 0px));
+    z-index: 40;
     grid-template-columns: repeat(5, minmax(0, 1fr));
     gap: 6px;
     padding: 10px 8px 12px;
@@ -1486,7 +1487,7 @@ button {
 
   .phone-shell {
     min-height: calc(100vh - 24px);
-    padding: 16px 12px 108px;
+    padding: 16px 12px calc(112px + env(safe-area-inset-bottom, 0px));
   }
 
   .app-topbar {
