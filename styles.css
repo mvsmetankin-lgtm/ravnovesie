@@ -33,6 +33,7 @@ body {
   font-family: "Manrope", sans-serif;
   color: var(--text);
   background: transparent;
+  overflow-x: hidden;
 }
 
 button,
@@ -466,6 +467,7 @@ button {
   z-index: 1;
   max-width: none;
   width: 100%;
+  min-width: 0;
 }
 
 .home-screen,
@@ -482,6 +484,11 @@ button {
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
+}
+
+.home-header > div,
+.tab-header > div {
+  min-width: 0;
 }
 
 .home-header h1,
@@ -596,6 +603,8 @@ button {
 .welcome-block h2 {
   margin: 0 0 6px;
   font-size: 18px;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
 }
 
 .welcome-block p {
@@ -603,6 +612,8 @@ button {
   color: var(--text-muted);
   font-size: 14px;
   font-style: italic;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 
 .quick-actions {
@@ -623,6 +634,9 @@ button {
   font-size: 13px;
   font-weight: 700;
   box-shadow: var(--shadow-sm);
+  max-width: 100%;
+  white-space: normal;
+  text-align: left;
 }
 
 .quick-action--green {
@@ -652,6 +666,7 @@ button {
   gap: 12px;
   background: var(--surface);
   box-shadow: var(--shadow-md);
+  min-width: 0;
 }
 
 .media-thumb {
@@ -677,11 +692,18 @@ button {
 .practice-card__tags {
   display: grid;
   gap: 4px;
+  min-width: 0;
 }
 
 .practice-card__tags span:first-child {
   color: var(--accent);
   font-weight: 700;
+}
+
+.practice-card__content,
+.practice-card__tags span {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .banners-grid {
@@ -1409,7 +1431,7 @@ button {
 
 @media (max-width: 640px) {
   .page-shell {
-    width: min(100% - 20px, 1180px);
+    width: min(calc(100% - 20px), 1180px);
     padding: 12px 0;
   }
 
@@ -1451,6 +1473,105 @@ button {
 
   .phone-shell {
     min-height: calc(100vh - 24px);
+    padding: 16px 12px 108px;
+  }
+
+  .app-topbar {
+    margin-bottom: 14px;
+  }
+
+  .home-screen,
+  .tab-screen,
+  .admin-screen,
+  .diary-screen {
+    gap: 16px;
+  }
+
+  .home-header,
+  .tab-header {
+    gap: 12px;
+  }
+
+  .home-header h1,
+  .tab-header h1 {
+    font-size: 20px;
+  }
+
+  .horizontal-scroll {
+    grid-auto-columns: 108px;
+    gap: 8px;
+  }
+
+  .category-card {
+    min-height: 128px;
+    border-radius: 22px;
+    padding: 10px;
+  }
+
+  .category-card span {
+    font-size: 13px;
+  }
+
+  .welcome-block h2 {
+    font-size: 16px;
+  }
+
+  .welcome-block p {
+    font-size: 13px;
+  }
+
+  .quick-actions {
+    grid-template-columns: 1fr;
+    display: grid;
+  }
+
+  .quick-action {
+    width: 100%;
+    justify-content: flex-start;
+    padding: 12px 14px;
+  }
+
+  .cards-row {
+    grid-auto-columns: minmax(232px, 84vw);
+    gap: 10px;
+  }
+
+  .practice-card {
+    grid-template-columns: 88px minmax(0, 1fr);
+    min-height: 112px;
+  }
+
+  .practice-card h3 {
+    font-size: 16px;
+  }
+
+  .practice-card__tags {
+    gap: 2px;
+  }
+
+  .practice-card__tags span {
+    font-size: 12px;
+  }
+
+  .banners-grid {
+    gap: 10px;
+  }
+
+  .banner-card {
+    min-height: 96px;
+  }
+
+  .progress-card__value {
+    font-size: 16px;
+  }
+
+  .progress-card__goal {
+    font-size: 13px;
+    line-height: 1.4;
+  }
+
+  .week-progress {
+    gap: 6px;
   }
 
   .reel-player {
