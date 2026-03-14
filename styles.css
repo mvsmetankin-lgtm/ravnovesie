@@ -181,6 +181,25 @@ button {
   color: #ce4b4b;
 }
 
+.telegram-auth {
+  display: grid;
+  gap: 14px;
+  margin: 0 0 12px;
+  padding: 16px 18px;
+  border-radius: 20px;
+  background: rgba(235, 242, 255, 0.78);
+  color: var(--text-muted);
+}
+
+.telegram-auth p {
+  margin: 0;
+  line-height: 1.6;
+}
+
+.telegram-auth__button {
+  justify-self: start;
+}
+
 .auth-screen {
   display: none;
   padding: 20px;

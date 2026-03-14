@@ -11,6 +11,8 @@ const pageShell = document.getElementById("pageShell");
 const authView = document.getElementById("authView");
 const appView = document.getElementById("appView");
 const authStatus = document.getElementById("authStatus");
+const telegramAuth = document.getElementById("telegramAuth");
+const telegramLoginButton = document.getElementById("telegramLoginButton");
 const appStatus = document.getElementById("appStatus");
 const appContent = document.getElementById("appContent");
 const bottomNav = document.getElementById("bottomNav");
@@ -33,6 +35,9 @@ const adminNavButtons = document.querySelectorAll("[data-admin-nav]");
 const state = {
   authScreen: "login",
   currentTab: "home",
+  authMode: "supabase",
+  apiToken: "",
+  adminEmail: "",
   session: null,
   profile: null,
   homeFeed: null,
@@ -72,7 +77,6 @@ const tabLabels = {
 };
 
 const REQUEST_TIMEOUT_MS = 3500;
-const ADMIN_EMAIL = "admin@example.com";
 const REEL_DURATION_MS = 10000;
 
 const DEFAULT_HOME_CONTENT = {
@@ -277,9 +281,76 @@ function setAuthStatus(message, type = "info") {
   authStatus.classList.toggle("is-error", type === "error");
 }
 
+function getTelegramWebApp() {
+  return window.Telegram?.WebApp || null;
+}
+
+function isTelegramRuntime() {
+  return Boolean(getTelegramWebApp()?.initData);
+}
+
+function updateTelegramAuthUi() {
+  telegramAuth?.classList.toggle("is-hidden", !getTelegramWebApp());
+}
+
+function isTelegramSession() {
+  return state.authMode === "telegram";
+}
+
+function buildPseudoSession(profile) {
+  return {
+    access_token: state.apiToken,
+    user: {
+      id: profile.id,
+      email: profile.email,
+      created_at: profile.created_at,
+      user_metadata: {
+        first_name: profile.first_name || "",
+        second_name: profile.second_name || null,
+        avatar_url: profile.avatar_url || null,
+        auth_provider: profile.auth_provider || "telegram",
+      },
+    },
+  };
+}
+
+async function apiRequest(path, options = {}) {
+  const headers = new Headers(options.headers || {});
+  headers.set("Content-Type", "application/json");
+
+  if (state.apiToken) {
+    headers.set("Authorization", `Bearer ${state.apiToken}`);
+  }
+
+  const response = await fetch(path, {
+    ...options,
+    headers,
+  });
+  const payload = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    throw new Error(payload.error || "Не удалось выполнить запрос к backend.");
+  }
+
+  return payload;
+}
+
 function isAdminUser() {
+  if (!state.adminEmail) {
+    return false;
+  }
+
   const email = state.session?.user?.email || state.profile?.email || "";
-  return email.toLowerCase() === ADMIN_EMAIL;
+  return email.toLowerCase() === state.adminEmail.toLowerCase();
+}
+
+async function loadRuntimeConfig() {
+  try {
+    const payload = await apiRequest("/api/config");
+    state.adminEmail = payload.adminEmail || "";
+  } catch (_error) {
+    state.adminEmail = "";
+  }
 }
 
 function setAppStatus(message = "", type = "info") {
@@ -352,7 +423,7 @@ function getPasswordResetRedirect() {
 }
 
 function getAvatarMarkup(profile, authUser) {
-  const avatarUrl = authUser?.user_metadata?.avatar_url || "";
+  const avatarUrl = profile?.avatar_url || authUser?.user_metadata?.avatar_url || "";
   const nameSeed = profile?.first_name || authUser?.email || "MF";
   const initials = nameSeed
     .split(" ")
@@ -1321,6 +1392,16 @@ async function loadAdminData() {
     throw new Error("Для админки нужна активная сессия.");
   }
 
+  if (isTelegramSession()) {
+    const payload = await apiRequest("/api/admin/content");
+    state.adminData = {
+      categories: payload.categories || [],
+      practices: payload.practices || [],
+      banners: payload.banners || [],
+    };
+    return;
+  }
+
   const [categories, practices, banners] = await Promise.all([
     safeSelect(
       () =>
@@ -1367,7 +1448,7 @@ function resetAdminSelection(sectionName) {
 
 async function enterAdminMode() {
   if (!isAdminUser()) {
-    setAppStatus("Доступ к админке разрешен только admin@example.com.", "error");
+    setAppStatus("Доступ к админке разрешен только администратору.", "error");
     return;
   }
 
@@ -1441,6 +1522,26 @@ async function saveAdminRecord(sectionName, formElement) {
   const id = formData.get("id")?.toString().trim();
   const payload = sanitizeAdminPayload(sectionName, formData);
 
+  if (isTelegramSession()) {
+    if (id) {
+      await apiRequest(`/api/admin/${sectionName}/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify(payload),
+      });
+    } else {
+      await apiRequest(`/api/admin/${sectionName}`, {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+    }
+
+    resetAdminSelection(sectionName);
+    await loadAdminData();
+    await refreshHomeFeed();
+    renderAdminScreen();
+    return;
+  }
+
   if (id) {
     const { error } = await withTimeout(
       supabaseClient.from(config.table).update(payload).eq("id", id),
@@ -1469,6 +1570,19 @@ async function saveAdminRecord(sectionName, formElement) {
 
 async function deleteAdminRecord(sectionName, id) {
   const config = ADMIN_SECTIONS[sectionName];
+
+  if (isTelegramSession()) {
+    await apiRequest(`/api/admin/${sectionName}/${id}`, {
+      method: "DELETE",
+    });
+
+    resetAdminSelection(sectionName);
+    await loadAdminData();
+    await refreshHomeFeed();
+    renderAdminScreen();
+    return;
+  }
+
   const { error } = await withTimeout(
     supabaseClient.from(config.table).delete().eq("id", id),
     "Истекло время ожидания удаления записи.",
@@ -1587,6 +1701,26 @@ async function login(email, password) {
   return data.session;
 }
 
+async function loginWithTelegram() {
+  const webApp = getTelegramWebApp();
+
+  if (!webApp?.initData) {
+    throw new Error("Открой приложение внутри Telegram, чтобы войти этим способом.");
+  }
+
+  const { token, profile } = await apiRequest("/api/auth/telegram", {
+    method: "POST",
+    body: JSON.stringify({
+      initData: webApp.initData,
+    }),
+  });
+
+  state.authMode = "telegram";
+  state.apiToken = token;
+  state.profile = profile;
+  return buildPseudoSession(profile);
+}
+
 async function register(email, password, firstName, secondName) {
   const { data, error } = await supabaseClient.auth.signUp({
     email,
@@ -1637,13 +1771,17 @@ async function resetPassword(email) {
 }
 
 async function logout() {
-  const { error } = await supabaseClient.auth.signOut();
+  if (!isTelegramSession()) {
+    const { error } = await supabaseClient.auth.signOut();
 
-  if (error) {
-    setAppStatus(error.message || "Не удалось выйти.", "error");
-    return;
+    if (error) {
+      setAppStatus(error.message || "Не удалось выйти.", "error");
+      return;
+    }
   }
 
+  state.authMode = "supabase";
+  state.apiToken = "";
   state.session = null;
   state.profile = null;
   state.homeFeed = null;
@@ -1667,6 +1805,11 @@ async function loadCurrentUserProfile() {
 
   if (!authUser?.id) {
     throw new Error("Сессия пользователя не найдена.");
+  }
+
+  if (isTelegramSession()) {
+    const payload = await apiRequest("/api/profile");
+    return payload.profile || state.profile;
   }
 
   const { data, error } = await withTimeout(
@@ -1749,6 +1892,11 @@ async function loadDiaryData() {
     throw new Error("Для дневника нужна активная сессия.");
   }
 
+  if (isTelegramSession()) {
+    state.diaryData = await apiRequest("/api/diary");
+    return state.diaryData;
+  }
+
   const [goalRow, entries] = await Promise.all([
     safeSelect(
       () =>
@@ -1780,6 +1928,17 @@ async function loadDiaryData() {
 
 async function saveDiaryGoal(goal) {
   const authUser = state.session?.user;
+
+  if (isTelegramSession()) {
+    await apiRequest("/api/diary/goal", {
+      method: "PUT",
+      body: JSON.stringify({
+        goal_words: goal,
+      }),
+    });
+    return;
+  }
+
   const payload = {
     user_id: authUser.id,
     daily_word_goal: goal,
@@ -1797,6 +1956,18 @@ async function saveDiaryGoal(goal) {
 
 async function createDiaryEntry({ content, emotion_tags }) {
   const authUser = state.session?.user;
+
+  if (isTelegramSession()) {
+    await apiRequest("/api/diary/entries", {
+      method: "POST",
+      body: JSON.stringify({
+        content,
+        emotion_tags,
+      }),
+    });
+    return;
+  }
+
   const payload = {
     user_id: authUser.id,
     content,
@@ -1815,6 +1986,17 @@ async function createDiaryEntry({ content, emotion_tags }) {
 }
 
 async function updateDiaryEntry(id, { content, emotion_tags }) {
+  if (isTelegramSession()) {
+    await apiRequest(`/api/diary/entries/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        content,
+        emotion_tags,
+      }),
+    });
+    return;
+  }
+
   const payload = {
     content,
     word_count: countWords(content),
@@ -1833,6 +2015,13 @@ async function updateDiaryEntry(id, { content, emotion_tags }) {
 }
 
 async function deleteDiaryEntry(id) {
+  if (isTelegramSession()) {
+    await apiRequest(`/api/diary/entries/${id}`, {
+      method: "DELETE",
+    });
+    return;
+  }
+
   const { error } = await withTimeout(
     supabaseClient.from("journal_entries").delete().eq("id", id),
     "Истекло время ожидания удаления записи дневника.",
@@ -1866,6 +2055,20 @@ async function loadHomeFeed() {
 
   if (!authUser?.id) {
     throw new Error("Нужно авторизоваться перед загрузкой главной страницы.");
+  }
+
+  if (isTelegramSession()) {
+    const payload = await apiRequest("/api/home");
+    if (payload.profile) {
+      state.profile = payload.profile;
+    }
+
+    return mergeHomeFeedWithDefaults({
+      categories: payload.categories || [],
+      practices: payload.practices || [],
+      banners: payload.banners || [],
+      progress: payload.progress || DEFAULT_HOME_CONTENT.progress,
+    });
   }
 
   const today = new Date();
@@ -2010,13 +2213,24 @@ async function enterApp(session) {
 async function handleLoginSubmit(form) {
   const email = form.elements.email.value.trim();
   const password = form.elements.password.value;
+  state.authMode = "supabase";
+  state.apiToken = "";
   const session = await login(email, password);
 
   setAuthStatus("Вход выполнен успешно.", "success");
   await enterApp(session);
 }
 
+async function handleTelegramLogin() {
+  setAuthStatus("Проверяем Telegram Mini App...");
+  const session = await loginWithTelegram();
+  setAuthStatus("Вход через Telegram выполнен.", "success");
+  await enterApp(session);
+}
+
 async function handleRegisterSubmit(form) {
+  state.authMode = "supabase";
+  state.apiToken = "";
   const password = form.elements.password.value;
   const passwordConfirmation = form.elements.passwordConfirmation.value;
   const firstName = form.elements.firstName.value.trim();
@@ -2092,6 +2306,14 @@ bottomNavButtons.forEach((button) => {
   });
 });
 
+telegramLoginButton?.addEventListener("click", async () => {
+  try {
+    await handleTelegramLogin();
+  } catch (error) {
+    setAuthStatus(error.message || "Не удалось войти через Telegram.", "error");
+  }
+});
+
 adminNavButtons.forEach((button) => {
   button.addEventListener("click", () => {
     state.adminSection = button.dataset.adminNav;
@@ -2134,6 +2356,10 @@ window.addEventListener("keydown", (event) => {
 });
 
 supabaseClient.auth.onAuthStateChange(async (event, session) => {
+  if (isTelegramSession()) {
+    return;
+  }
+
   if (event === "SIGNED_OUT") {
     return;
   }
@@ -2149,8 +2375,26 @@ supabaseClient.auth.onAuthStateChange(async (event, session) => {
 
 async function bootstrap() {
   setActiveAuthScreen("login");
+  updateTelegramAuthUi();
+  await loadRuntimeConfig();
   updateAdminToggleButtons();
   updateNavigationVisibility();
+
+  const telegramWebApp = getTelegramWebApp();
+  telegramWebApp?.ready?.();
+  telegramWebApp?.expand?.();
+
+  if (isTelegramRuntime()) {
+    try {
+      await handleTelegramLogin();
+      return;
+    } catch (error) {
+      setAuthStatus(
+        error.message || "Не удалось выполнить автоматический вход через Telegram.",
+        "error",
+      );
+    }
+  }
 
   const {
     data: { session },
