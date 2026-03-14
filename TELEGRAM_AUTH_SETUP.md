@@ -4,6 +4,8 @@
 
 Paste the contents of [supabase-telegram-auth.sql](/Users/makssmetankin/.codex/worktrees/f9c1/Codex/supabase-telegram-auth.sql) into the Supabase SQL editor and run it.
 
+Then run [supabase-admin-roles.sql](/Users/makssmetankin/.codex/worktrees/f9c1/Codex/supabase-admin-roles.sql) to add `is_admin` and `is_super_admin`.
+
 ## 2. Backend env
 
 Copy `.env.example` to `.env` and fill in:

@@ -9,8 +9,9 @@ const {
   TELEGRAM_BOT_TOKEN = "",
   SUPABASE_URL = "",
   SUPABASE_SERVICE_ROLE_KEY = "",
-  ADMIN_EMAIL = "admin@example.com",
 } = process.env;
+
+const SUPER_ADMIN_EMAIL = "mvsmetankin@gmail.com";
 
 if (!APP_SESSION_SECRET || !TELEGRAM_BOT_TOKEN || !SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
   console.warn(
@@ -35,6 +36,16 @@ const ADMIN_SECTIONS = {
 };
 
 app.use(express.json({ limit: "1mb" }));
+
+function getRoleFlags(email, currentProfile = null) {
+  const normalizedEmail = String(email || "").trim().toLowerCase();
+  const isSuperAdmin = normalizedEmail === SUPER_ADMIN_EMAIL.toLowerCase();
+
+  return {
+    is_admin: isSuperAdmin || Boolean(currentProfile?.is_admin),
+    is_super_admin: isSuperAdmin || Boolean(currentProfile?.is_super_admin),
+  };
+}
 
 function encodeBase64Url(value) {
   return Buffer.from(value)
@@ -72,6 +83,16 @@ function createSessionToken(payload) {
   };
   const encodedPayload = encodeBase64Url(JSON.stringify(body));
   return `${encodedPayload}.${signValue(encodedPayload)}`;
+}
+
+function buildSessionPayload(profile) {
+  return {
+    sub: profile.id,
+    email: profile.email,
+    auth_provider: profile.auth_provider || "email",
+    is_admin: Boolean(profile.is_admin),
+    is_super_admin: Boolean(profile.is_super_admin),
+  };
 }
 
 function parseSessionToken(token) {
@@ -206,6 +227,9 @@ async function ensureTelegramUser(telegramUser) {
     }
   }
 
+  const currentProfile = authUser ? await getProfile(authUser.id) : null;
+  const roleFlags = getRoleFlags(email, currentProfile);
+
   const profilePayload = {
     id: authUser.id,
     email,
@@ -215,13 +239,14 @@ async function ensureTelegramUser(telegramUser) {
     telegram_username: telegramUser.username || null,
     avatar_url: telegramUser.photo_url || null,
     auth_provider: "telegram",
+    ...roleFlags,
   };
 
   const { data: profile, error: profileError } = await supabaseAdmin
     .from("user")
     .upsert(profilePayload, { onConflict: "id" })
     .select(
-      "id, email, first_name, second_name, created_at, telegram_id, telegram_username, avatar_url, auth_provider",
+      "id, email, first_name, second_name, created_at, telegram_id, telegram_username, avatar_url, auth_provider, is_admin, is_super_admin",
     )
     .single();
 
@@ -236,10 +261,66 @@ async function getProfile(userId) {
   const { data, error } = await supabaseAdmin
     .from("user")
     .select(
-      "id, email, first_name, second_name, created_at, telegram_id, telegram_username, avatar_url, auth_provider",
+      "id, email, first_name, second_name, created_at, telegram_id, telegram_username, avatar_url, auth_provider, is_admin, is_super_admin",
     )
     .eq("id", userId)
     .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  return data;
+}
+
+async function upsertProfileFromAuthUser(authUser, overrides = {}) {
+  const existingProfile = await getProfile(authUser.id);
+  const roleFlags = getRoleFlags(authUser.email, existingProfile);
+  const profilePayload = {
+    id: authUser.id,
+    email: authUser.email,
+    first_name:
+      overrides.first_name ??
+      existingProfile?.first_name ??
+      authUser.user_metadata?.first_name ??
+      "",
+    second_name:
+      overrides.second_name ??
+      existingProfile?.second_name ??
+      authUser.user_metadata?.second_name ??
+      null,
+    telegram_id:
+      overrides.telegram_id ??
+      existingProfile?.telegram_id ??
+      (authUser.user_metadata?.telegram_id
+        ? String(authUser.user_metadata.telegram_id)
+        : null),
+    telegram_username:
+      overrides.telegram_username ??
+      existingProfile?.telegram_username ??
+      authUser.user_metadata?.telegram_username ??
+      null,
+    avatar_url:
+      overrides.avatar_url ??
+      existingProfile?.avatar_url ??
+      authUser.user_metadata?.avatar_url ??
+      null,
+    auth_provider:
+      overrides.auth_provider ??
+      existingProfile?.auth_provider ??
+      authUser.user_metadata?.auth_provider ??
+      "email",
+    ...roleFlags,
+    ...overrides,
+  };
+
+  const { data, error } = await supabaseAdmin
+    .from("user")
+    .upsert(profilePayload, { onConflict: "id" })
+    .select(
+      "id, email, first_name, second_name, created_at, telegram_id, telegram_username, avatar_url, auth_provider, is_admin, is_super_admin",
+    )
+    .single();
 
   if (error) {
     throw error;
@@ -357,8 +438,17 @@ async function requireAuth(req, res, next) {
 }
 
 function requireAdmin(req, res, next) {
-  if ((req.auth?.email || "").toLowerCase() !== ADMIN_EMAIL.toLowerCase()) {
+  if (!req.auth?.is_admin && !req.auth?.is_super_admin) {
     res.status(403).json({ error: "Доступ разрешен только администратору." });
+    return;
+  }
+
+  next();
+}
+
+function requireSuperAdmin(req, res, next) {
+  if (!req.auth?.is_super_admin) {
+    res.status(403).json({ error: "Только главный администратор может создавать других администраторов." });
     return;
   }
 
@@ -371,7 +461,7 @@ app.get("/api/health", (_req, res) => {
 
 app.get("/api/config", (_req, res) => {
   res.json({
-    adminEmail: ADMIN_EMAIL,
+    superAdminEmail: SUPER_ADMIN_EMAIL,
   });
 });
 
@@ -380,11 +470,7 @@ app.post("/api/auth/telegram", async (req, res) => {
     const { initData } = req.body || {};
     const telegramPayload = validateTelegramInitData(initData);
     const profile = await ensureTelegramUser(telegramPayload.user);
-    const token = createSessionToken({
-      sub: profile.id,
-      email: profile.email,
-      auth_provider: "telegram",
-    });
+    const token = createSessionToken(buildSessionPayload(profile));
 
     res.json({
       token,
@@ -392,6 +478,31 @@ app.post("/api/auth/telegram", async (req, res) => {
     });
   } catch (error) {
     res.status(400).json({ error: error.message || "Не удалось выполнить Telegram-вход." });
+  }
+});
+
+app.post("/api/auth/session", async (req, res) => {
+  try {
+    const accessToken = String(req.body?.accessToken || "");
+    if (!accessToken) {
+      throw new Error("Supabase access token не передан.");
+    }
+
+    const {
+      data: { user },
+      error,
+    } = await supabaseAdmin.auth.getUser(accessToken);
+
+    if (error || !user) {
+      throw error || new Error("Не удалось определить пользователя по Supabase-сессии.");
+    }
+
+    const profile = await upsertProfileFromAuthUser(user);
+    const token = createSessionToken(buildSessionPayload(profile));
+
+    res.json({ token, profile });
+  } catch (error) {
+    res.status(400).json({ error: error.message || "Не удалось создать backend-сессию." });
   }
 });
 
@@ -540,6 +651,104 @@ app.get("/api/admin/content", requireAuth, requireAdmin, async (_req, res) => {
     });
   } catch (error) {
     res.status(500).json({ error: error.message || "Не удалось загрузить админ-данные." });
+  }
+});
+
+app.get("/api/admin/users", requireAuth, requireSuperAdmin, async (_req, res) => {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from("user")
+      .select(
+        "id, email, first_name, second_name, created_at, is_admin, is_super_admin, auth_provider",
+      )
+      .or("is_admin.eq.true,is_super_admin.eq.true")
+      .order("created_at", { ascending: true });
+
+    if (error) {
+      throw error;
+    }
+
+    res.json({ users: data || [] });
+  } catch (error) {
+    res.status(500).json({ error: error.message || "Не удалось загрузить список администраторов." });
+  }
+});
+
+app.post("/api/admin/users", requireAuth, requireSuperAdmin, async (req, res) => {
+  try {
+    const email = String(req.body?.email || "").trim().toLowerCase();
+    const password = String(req.body?.password || "");
+    const firstName = String(req.body?.first_name || "").trim();
+    const secondNameRaw = String(req.body?.second_name || "").trim();
+    const secondName = secondNameRaw || null;
+
+    if (!email || !password || !firstName) {
+      throw new Error("Укажи email, пароль и имя нового администратора.");
+    }
+
+    if (email === SUPER_ADMIN_EMAIL.toLowerCase()) {
+      throw new Error("Главный администратор уже существует и не создается через эту форму.");
+    }
+
+    const { data: listedUsers, error: listError } = await supabaseAdmin.auth.admin.listUsers({
+      page: 1,
+      perPage: 1000,
+    });
+
+    if (listError) {
+      throw listError;
+    }
+
+    let authUser = listedUsers.users.find((item) => item.email?.toLowerCase() === email) || null;
+
+    if (!authUser) {
+      const { data: createdUser, error: createError } = await supabaseAdmin.auth.admin.createUser({
+        email,
+        password,
+        email_confirm: true,
+        user_metadata: {
+          first_name: firstName,
+          second_name: secondName,
+          auth_provider: "email",
+          is_admin: true,
+          is_super_admin: false,
+        },
+      });
+
+      if (createError) {
+        throw createError;
+      }
+
+      authUser = createdUser.user;
+    } else {
+      const { error: updateError } = await supabaseAdmin.auth.admin.updateUserById(authUser.id, {
+        password,
+        user_metadata: {
+          ...(authUser.user_metadata || {}),
+          first_name: firstName || authUser.user_metadata?.first_name || "",
+          second_name: secondName,
+          auth_provider: authUser.user_metadata?.auth_provider || "email",
+          is_admin: true,
+          is_super_admin: false,
+        },
+      });
+
+      if (updateError) {
+        throw updateError;
+      }
+    }
+
+    const profile = await upsertProfileFromAuthUser(authUser, {
+      first_name: firstName,
+      second_name: secondName,
+      auth_provider: "email",
+      is_admin: true,
+      is_super_admin: false,
+    });
+
+    res.json({ user: profile });
+  } catch (error) {
+    res.status(400).json({ error: error.message || "Не удалось создать администратора." });
   }
 });
 

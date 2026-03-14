@@ -38,7 +38,6 @@ const state = {
   currentTab: "home",
   authMode: "supabase",
   apiToken: "",
-  adminEmail: "",
   session: null,
   profile: null,
   homeFeed: null,
@@ -53,6 +52,7 @@ const state = {
     categories: [],
     practices: [],
     banners: [],
+    users: [],
   },
   adminSelections: {
     categories: null,
@@ -310,6 +310,8 @@ function buildPseudoSession(profile) {
         second_name: profile.second_name || null,
         avatar_url: profile.avatar_url || null,
         auth_provider: profile.auth_provider || "telegram",
+        is_admin: Boolean(profile.is_admin),
+        is_super_admin: Boolean(profile.is_super_admin),
       },
     },
   };
@@ -337,21 +339,18 @@ async function apiRequest(path, options = {}) {
 }
 
 function isAdminUser() {
-  if (!state.adminEmail) {
-    return false;
-  }
-
-  const email = state.session?.user?.email || state.profile?.email || "";
-  return email.toLowerCase() === state.adminEmail.toLowerCase();
+  return Boolean(
+    state.profile?.is_admin ||
+      state.profile?.is_super_admin ||
+      state.session?.user?.user_metadata?.is_admin ||
+      state.session?.user?.user_metadata?.is_super_admin,
+  );
 }
 
-async function loadRuntimeConfig() {
-  try {
-    const payload = await apiRequest("/api/config");
-    state.adminEmail = payload.adminEmail || "";
-  } catch (_error) {
-    state.adminEmail = "";
-  }
+function isSuperAdminUser() {
+  return Boolean(
+    state.profile?.is_super_admin || state.session?.user?.user_metadata?.is_super_admin,
+  );
 }
 
 function setAppStatus(message = "", type = "info") {
@@ -773,6 +772,27 @@ function renderAdminSection(sectionName) {
 
 function renderAdminScreen() {
   if (state.adminSection === "profile") {
+    const adminUsersMarkup = (state.adminData.users || []).length
+      ? state.adminData.users
+          .map((user) => {
+            const roleLabel = user.is_super_admin ? "Главный админ" : "Админ";
+            return `
+              <article class="admin-list-item">
+                <div class="admin-list-item__body">
+                  <h4>${escapeHtml(user.first_name || user.email || "Администратор")}</h4>
+                  <p>${escapeHtml(user.email || "")} • ${escapeHtml(roleLabel)}</p>
+                </div>
+              </article>
+            `;
+          })
+          .join("")
+      : `
+        <article class="admin-empty">
+          <h4>Пока нет администраторов</h4>
+          <p>Главный администратор может создавать дополнительных администраторов здесь.</p>
+        </article>
+      `;
+
     appContent.innerHTML = `
       <section class="admin-screen">
         <header class="admin-screen__header">
@@ -796,12 +816,53 @@ function renderAdminScreen() {
               <button class="secondary-button" type="button" id="logoutButton">Выйти из аккаунта</button>
             </div>
           </article>
+          ${
+            isSuperAdminUser()
+              ? `
+                <article class="admin-panel">
+                  <div class="admin-panel__header">
+                    <div>
+                      <h3>Управление администраторами</h3>
+                      <p>Только главный администратор может создавать новых администраторов. Новые админы не могут создавать других админов.</p>
+                    </div>
+                  </div>
+                  <form class="admin-form" id="adminUserForm">
+                    <div class="admin-form__grid">
+                      <label class="admin-field">
+                        <span>Email</span>
+                        <input type="email" name="email" required />
+                      </label>
+                      <label class="admin-field">
+                        <span>Пароль</span>
+                        <input type="password" name="password" minlength="8" required />
+                      </label>
+                      <label class="admin-field">
+                        <span>Имя</span>
+                        <input type="text" name="first_name" required />
+                      </label>
+                      <label class="admin-field">
+                        <span>Фамилия</span>
+                        <input type="text" name="second_name" />
+                      </label>
+                    </div>
+                    <div class="admin-form__actions">
+                      <button class="primary-button" type="submit">Создать администратора</button>
+                    </div>
+                  </form>
+                  <div class="admin-list">
+                    ${adminUsersMarkup}
+                  </div>
+                </article>
+              `
+              : ""
+          }
         </section>
       </section>
     `;
 
     const refreshButton = document.getElementById("adminRefreshButton");
     const logoutButton = document.getElementById("logoutButton");
+    const adminUserForm = document.getElementById("adminUserForm");
 
     refreshButton?.addEventListener("click", async () => {
       setAppStatus("Обновляем данные...");
@@ -813,6 +874,19 @@ function renderAdminScreen() {
 
     logoutButton?.addEventListener("click", async () => {
       await logout();
+    });
+
+    adminUserForm?.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      setAppStatus("Создаём администратора...");
+
+      try {
+        await createAdminUser(new FormData(adminUserForm));
+        renderAdminScreen();
+        setAppStatus("Новый администратор создан.", "success");
+      } catch (error) {
+        setAppStatus(error.message || "Не удалось создать администратора.", "error");
+      }
     });
 
     updateNavigationVisibility();
@@ -1395,12 +1469,17 @@ async function loadAdminData() {
     throw new Error("Для админки нужна активная сессия.");
   }
 
-  if (isTelegramSession()) {
+  if (state.apiToken) {
     const payload = await apiRequest("/api/admin/content");
+    const usersPayload = isSuperAdminUser()
+      ? await apiRequest("/api/admin/users")
+      : { users: [] };
+
     state.adminData = {
       categories: payload.categories || [],
       practices: payload.practices || [],
       banners: payload.banners || [],
+      users: usersPayload.users || [],
     };
     return;
   }
@@ -1438,6 +1517,7 @@ async function loadAdminData() {
     categories,
     practices,
     banners,
+    users: [],
   };
 }
 
@@ -1447,6 +1527,20 @@ function getAdminSelection(sectionName, id) {
 
 function resetAdminSelection(sectionName) {
   state.adminSelections[sectionName] = null;
+}
+
+async function createAdminUser(formData) {
+  await apiRequest("/api/admin/users", {
+    method: "POST",
+    body: JSON.stringify({
+      email: formData.get("email")?.toString().trim() || "",
+      password: formData.get("password")?.toString() || "",
+      first_name: formData.get("first_name")?.toString().trim() || "",
+      second_name: formData.get("second_name")?.toString().trim() || "",
+    }),
+  });
+
+  await loadAdminData();
 }
 
 async function enterAdminMode() {
@@ -1724,6 +1818,23 @@ async function loginWithTelegram() {
   return buildPseudoSession(profile);
 }
 
+async function createBackendSessionFromSupabase(session) {
+  if (!session?.access_token) {
+    return null;
+  }
+
+  const { token, profile } = await apiRequest("/api/auth/session", {
+    method: "POST",
+    body: JSON.stringify({
+      accessToken: session.access_token,
+    }),
+  });
+
+  state.apiToken = token;
+  state.profile = profile;
+  return token;
+}
+
 async function register(email, password, firstName, secondName) {
   const { data, error } = await supabaseClient.auth.signUp({
     email,
@@ -1751,6 +1862,8 @@ async function register(email, password, firstName, secondName) {
     email,
     first_name: firstName,
     second_name: secondName || null,
+    is_admin: false,
+    is_super_admin: false,
   });
 
   if (profileError) {
@@ -1818,7 +1931,9 @@ async function loadCurrentUserProfile() {
   const { data, error } = await withTimeout(
     supabaseClient
       .from("user")
-      .select("id, email, first_name, second_name, created_at")
+      .select(
+        "id, email, first_name, second_name, created_at, avatar_url, auth_provider, is_admin, is_super_admin",
+      )
       .eq("id", authUser.id)
       .maybeSingle(),
     "Истекло время ожидания профиля пользователя.",
@@ -1834,6 +1949,10 @@ async function loadCurrentUserProfile() {
       email: authUser.email,
       first_name: authUser.user_metadata?.first_name || "",
       second_name: authUser.user_metadata?.second_name || null,
+      avatar_url: authUser.user_metadata?.avatar_url || null,
+      auth_provider: authUser.user_metadata?.auth_provider || "email",
+      is_admin: Boolean(authUser.user_metadata?.is_admin),
+      is_super_admin: Boolean(authUser.user_metadata?.is_super_admin),
       created_at: authUser.created_at || null,
     }
   );
@@ -2168,6 +2287,10 @@ async function refreshHomeFeed() {
         email: state.session?.user?.email || "",
         first_name: state.session?.user?.user_metadata?.first_name || "",
         second_name: state.session?.user?.user_metadata?.second_name || null,
+        avatar_url: state.session?.user?.user_metadata?.avatar_url || null,
+        auth_provider: state.session?.user?.user_metadata?.auth_provider || "email",
+        is_admin: Boolean(state.session?.user?.user_metadata?.is_admin),
+        is_super_admin: Boolean(state.session?.user?.user_metadata?.is_super_admin),
         created_at: state.session?.user?.created_at || null,
       };
     state.homeFeed = DEFAULT_HOME_CONTENT;
@@ -2193,6 +2316,14 @@ async function enterApp(session) {
   setAppStatus("");
 
   try {
+    if (!isTelegramSession()) {
+      try {
+        await createBackendSessionFromSupabase(session);
+      } catch (error) {
+        console.warn(error);
+      }
+    }
+
     await refreshHomeFeed();
     if (isAdminUser()) {
       state.isAdminMode = true;
@@ -2379,7 +2510,6 @@ supabaseClient.auth.onAuthStateChange(async (event, session) => {
 async function bootstrap() {
   setActiveAuthScreen("login");
   updateTelegramAuthUi();
-  await loadRuntimeConfig();
   updateAdminToggleButtons();
   updateNavigationVisibility();
 
