@@ -752,6 +752,114 @@ app.post("/api/admin/users", requireAuth, requireSuperAdmin, async (req, res) =>
   }
 });
 
+app.patch("/api/admin/users/:id", requireAuth, requireSuperAdmin, async (req, res) => {
+  try {
+    const userId = String(req.params.id || "");
+    const email = String(req.body?.email || "").trim().toLowerCase();
+    const password = String(req.body?.password || "");
+    const firstName = String(req.body?.first_name || "").trim();
+    const secondNameRaw = String(req.body?.second_name || "").trim();
+    const secondName = secondNameRaw || null;
+
+    const profile = await getProfile(userId);
+    if (!profile) {
+      throw new Error("Администратор не найден.");
+    }
+
+    if (profile.is_super_admin || email === SUPER_ADMIN_EMAIL.toLowerCase()) {
+      throw new Error("Главного администратора нельзя изменять через эту форму.");
+    }
+
+    const { data: listedUsers, error: listError } = await supabaseAdmin.auth.admin.listUsers({
+      page: 1,
+      perPage: 1000,
+    });
+
+    if (listError) {
+      throw listError;
+    }
+
+    const authUser = listedUsers.users.find((item) => item.id === userId);
+    if (!authUser) {
+      throw new Error("Auth-пользователь администратора не найден.");
+    }
+
+    const updatePayload = {
+      email: email || authUser.email,
+      user_metadata: {
+        ...(authUser.user_metadata || {}),
+        first_name: firstName || authUser.user_metadata?.first_name || "",
+        second_name: secondName,
+        auth_provider: authUser.user_metadata?.auth_provider || "email",
+        is_admin: true,
+        is_super_admin: false,
+      },
+    };
+
+    if (password) {
+      updatePayload.password = password;
+    }
+
+    const { error: updateError } = await supabaseAdmin.auth.admin.updateUserById(
+      authUser.id,
+      updatePayload,
+    );
+
+    if (updateError) {
+      throw updateError;
+    }
+
+    const updatedProfile = await upsertProfileFromAuthUser(
+      {
+        ...authUser,
+        email: updatePayload.email,
+        user_metadata: updatePayload.user_metadata,
+      },
+      {
+        email: updatePayload.email,
+        first_name: updatePayload.user_metadata.first_name,
+        second_name: updatePayload.user_metadata.second_name,
+        auth_provider: "email",
+        is_admin: true,
+        is_super_admin: false,
+      },
+    );
+
+    res.json({ user: updatedProfile });
+  } catch (error) {
+    res.status(400).json({ error: error.message || "Не удалось обновить администратора." });
+  }
+});
+
+app.delete("/api/admin/users/:id", requireAuth, requireSuperAdmin, async (req, res) => {
+  try {
+    const userId = String(req.params.id || "");
+    const profile = await getProfile(userId);
+
+    if (!profile) {
+      throw new Error("Администратор не найден.");
+    }
+
+    if (profile.is_super_admin || String(profile.email || "").toLowerCase() === SUPER_ADMIN_EMAIL.toLowerCase()) {
+      throw new Error("Главного администратора нельзя удалить.");
+    }
+
+    const { error: deleteAuthError } = await supabaseAdmin.auth.admin.deleteUser(userId);
+    if (deleteAuthError) {
+      throw deleteAuthError;
+    }
+
+    const { error: deleteProfileError } = await supabaseAdmin.from("user").delete().eq("id", userId);
+    if (deleteProfileError) {
+      throw deleteProfileError;
+    }
+
+    res.json({ ok: true });
+  } catch (error) {
+    res.status(400).json({ error: error.message || "Не удалось удалить администратора." });
+  }
+});
+
 app.post("/api/admin/:section", requireAuth, requireAdmin, async (req, res) => {
   const table = ADMIN_SECTIONS[req.params.section];
   if (!table) {

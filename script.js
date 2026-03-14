@@ -45,6 +45,7 @@ const state = {
   diaryData: null,
   diaryFilter: "all",
   diaryEditingId: null,
+  adminUserEditingId: null,
   isEnteringApp: false,
   isAdminMode: false,
   adminSection: "dashboard",
@@ -772,6 +773,8 @@ function renderAdminSection(sectionName) {
 
 function renderAdminScreen() {
   if (state.adminSection === "profile") {
+    const editingAdmin =
+      (state.adminData.users || []).find((user) => user.id === state.adminUserEditingId) || null;
     const adminUsersMarkup = (state.adminData.users || []).length
       ? state.adminData.users
           .map((user) => {
@@ -782,6 +785,16 @@ function renderAdminScreen() {
                   <h4>${escapeHtml(user.first_name || user.email || "Администратор")}</h4>
                   <p>${escapeHtml(user.email || "")} • ${escapeHtml(roleLabel)}</p>
                 </div>
+                ${
+                  user.is_super_admin
+                    ? ""
+                    : `
+                      <div class="admin-list-item__actions">
+                        <button class="secondary-button" type="button" data-admin-user-edit="${escapeHtml(user.id)}">Редактировать</button>
+                        <button class="secondary-button" type="button" data-admin-user-delete="${escapeHtml(user.id)}">Удалить</button>
+                      </div>
+                    `
+                }
               </article>
             `;
           })
@@ -830,23 +843,28 @@ function renderAdminScreen() {
                     <div class="admin-form__grid">
                       <label class="admin-field">
                         <span>Email</span>
-                        <input type="email" name="email" required />
+                        <input type="email" name="email" value="${escapeHtml(editingAdmin?.email || "")}" required />
                       </label>
                       <label class="admin-field">
-                        <span>Пароль</span>
-                        <input type="password" name="password" minlength="8" required />
+                        <span>Пароль ${editingAdmin ? "(оставь пустым, если не меняешь)" : ""}</span>
+                        <input type="password" name="password" minlength="8" ${editingAdmin ? "" : "required"} />
                       </label>
                       <label class="admin-field">
                         <span>Имя</span>
-                        <input type="text" name="first_name" required />
+                        <input type="text" name="first_name" value="${escapeHtml(editingAdmin?.first_name || "")}" required />
                       </label>
                       <label class="admin-field">
                         <span>Фамилия</span>
-                        <input type="text" name="second_name" />
+                        <input type="text" name="second_name" value="${escapeHtml(editingAdmin?.second_name || "")}" />
                       </label>
                     </div>
                     <div class="admin-form__actions">
-                      <button class="primary-button" type="submit">Создать администратора</button>
+                      <button class="primary-button" type="submit">${editingAdmin ? "Сохранить изменения" : "Создать администратора"}</button>
+                      ${
+                        editingAdmin
+                          ? '<button class="secondary-button" type="button" id="cancelAdminUserEdit">Отмена</button>'
+                          : ""
+                      }
                     </div>
                   </form>
                   <div class="admin-list">
@@ -863,6 +881,9 @@ function renderAdminScreen() {
     const refreshButton = document.getElementById("adminRefreshButton");
     const logoutButton = document.getElementById("logoutButton");
     const adminUserForm = document.getElementById("adminUserForm");
+    const cancelAdminUserEdit = document.getElementById("cancelAdminUserEdit");
+    const adminUserEditButtons = appContent.querySelectorAll("[data-admin-user-edit]");
+    const adminUserDeleteButtons = appContent.querySelectorAll("[data-admin-user-delete]");
 
     refreshButton?.addEventListener("click", async () => {
       setAppStatus("Обновляем данные...");
@@ -878,15 +899,45 @@ function renderAdminScreen() {
 
     adminUserForm?.addEventListener("submit", async (event) => {
       event.preventDefault();
-      setAppStatus("Создаём администратора...");
+      setAppStatus(editingAdmin ? "Сохраняем администратора..." : "Создаём администратора...");
 
       try {
         await createAdminUser(new FormData(adminUserForm));
+        state.adminUserEditingId = null;
         renderAdminScreen();
-        setAppStatus("Новый администратор создан.", "success");
+        setAppStatus(
+          editingAdmin ? "Администратор обновлён." : "Новый администратор создан.",
+          "success",
+        );
       } catch (error) {
         setAppStatus(error.message || "Не удалось создать администратора.", "error");
       }
+    });
+
+    cancelAdminUserEdit?.addEventListener("click", () => {
+      state.adminUserEditingId = null;
+      renderAdminScreen();
+    });
+
+    adminUserEditButtons.forEach((button) => {
+      button.addEventListener("click", () => {
+        state.adminUserEditingId = button.dataset.adminUserEdit;
+        renderAdminScreen();
+      });
+    });
+
+    adminUserDeleteButtons.forEach((button) => {
+      button.addEventListener("click", async () => {
+        setAppStatus("Удаляем администратора...");
+
+        try {
+          await deleteAdminUser(button.dataset.adminUserDelete);
+          renderAdminScreen();
+          setAppStatus("Администратор удалён.", "success");
+        } catch (error) {
+          setAppStatus(error.message || "Не удалось удалить администратора.", "error");
+        }
+      });
     });
 
     updateNavigationVisibility();
@@ -1530,15 +1581,36 @@ function resetAdminSelection(sectionName) {
 }
 
 async function createAdminUser(formData) {
-  await apiRequest("/api/admin/users", {
-    method: "POST",
-    body: JSON.stringify({
-      email: formData.get("email")?.toString().trim() || "",
-      password: formData.get("password")?.toString() || "",
-      first_name: formData.get("first_name")?.toString().trim() || "",
-      second_name: formData.get("second_name")?.toString().trim() || "",
-    }),
+  const payload = {
+    email: formData.get("email")?.toString().trim() || "",
+    password: formData.get("password")?.toString() || "",
+    first_name: formData.get("first_name")?.toString().trim() || "",
+    second_name: formData.get("second_name")?.toString().trim() || "",
+  };
+
+  if (state.adminUserEditingId) {
+    await apiRequest(`/api/admin/users/${state.adminUserEditingId}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    });
+  } else {
+    await apiRequest("/api/admin/users", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  await loadAdminData();
+}
+
+async function deleteAdminUser(userId) {
+  await apiRequest(`/api/admin/users/${userId}`, {
+    method: "DELETE",
   });
+
+  if (state.adminUserEditingId === userId) {
+    state.adminUserEditingId = null;
+  }
 
   await loadAdminData();
 }
