@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MindFlow</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="page-shell" id="pageShell">
+      <section class="auth-view" id="authView" aria-label="Авторизация">
+        <div class="auth-hero">
+          <div class="auth-hero__badge">MindFlow</div>
+          <h1>Спокойный вход в твой ритм дня.</h1>
+          <p>
+            Авторизация, регистрация и восстановление пароля собраны в единый
+            сценарий. После входа открывается главная страница приложения.
+          </p>
+        </div>
+
+        <div class="auth-card">
+          <nav class="auth-tabs" aria-label="Экраны авторизации">
+            <button class="auth-tabs__item is-active" type="button" data-screen-target="login">
+              Вход
+            </button>
+            <button class="auth-tabs__item" type="button" data-screen-target="register">
+              Регистрация
+            </button>
+            <button class="auth-tabs__item" type="button" data-screen-target="reset">
+              Восстановление
+            </button>
+          </nav>
+
+          <div class="auth-status" id="authStatus" aria-live="polite">
+            Войдите в аккаунт, чтобы открыть главную страницу.
+          </div>
+
+          <section class="auth-screen is-active" data-screen="login">
+            <div class="auth-screen__header">
+              <p class="auth-screen__eyebrow">С возвращением</p>
+              <h2>Авторизация</h2>
+              <p>Введите данные аккаунта, чтобы открыть свое пространство.</p>
+            </div>
+
+            <form class="auth-form" data-form-name="login">
+              <label class="field">
+                <span>Email</span>
+                <input type="email" name="email" placeholder="name@company.com" required />
+              </label>
+
+              <label class="field">
+                <span>Пароль</span>
+                <input type="password" name="password" placeholder="Введите пароль" required />
+              </label>
+
+              <div class="auth-form__row">
+                <label class="checkbox">
+                  <input type="checkbox" name="remember" />
+                  <span>Запомнить меня</span>
+                </label>
+
+                <button class="link-button" type="button" data-screen-target="reset">
+                  Забыли пароль?
+                </button>
+              </div>
+
+              <button class="primary-button" type="submit">Войти</button>
+
+              <p class="auth-form__hint">
+                Нет аккаунта?
+                <button class="link-button" type="button" data-screen-target="register">
+                  Создать
+                </button>
+              </p>
+            </form>
+          </section>
+
+          <section class="auth-screen" data-screen="register">
+            <div class="auth-screen__header">
+              <p class="auth-screen__eyebrow">Новый аккаунт</p>
+              <h2>Регистрация</h2>
+              <p>Создайте профиль и получите доступ к домашнему экрану.</p>
+            </div>
+
+            <form class="auth-form" data-form-name="register">
+              <div class="field-grid">
+                <label class="field">
+                  <span>Имя</span>
+                  <input type="text" name="firstName" placeholder="Даша" required />
+                </label>
+
+                <label class="field">
+                  <span>Фамилия</span>
+                  <input type="text" name="lastName" placeholder="Иванова" />
+                </label>
+              </div>
+
+              <label class="field">
+                <span>Email</span>
+                <input type="email" name="email" placeholder="name@company.com" required />
+              </label>
+
+              <label class="field">
+                <span>Пароль</span>
+                <input
+                  type="password"
+                  name="password"
+                  placeholder="Не менее 8 символов"
+                  minlength="8"
+                  required
+                />
+              </label>
+
+              <label class="field">
+                <span>Подтверждение пароля</span>
+                <input
+                  type="password"
+                  name="passwordConfirmation"
+                  placeholder="Повторите пароль"
+                  minlength="8"
+                  required
+                />
+              </label>
+
+              <label class="checkbox">
+                <input type="checkbox" name="terms" required />
+                <span>Соглашаюсь с условиями сервиса и политикой конфиденциальности</span>
+              </label>
+
+              <button class="primary-button" type="submit">Создать аккаунт</button>
+
+              <p class="auth-form__hint">
+                Уже есть аккаунт?
+                <button class="link-button" type="button" data-screen-target="login">
+                  Войти
+                </button>
+              </p>
+            </form>
+          </section>
+
+          <section class="auth-screen" data-screen="reset">
+            <div class="auth-screen__header">
+              <p class="auth-screen__eyebrow">Быстрый доступ</p>
+              <h2>Восстановление пароля</h2>
+              <p>Введите email, и мы отправим письмо для сброса пароля.</p>
+            </div>
+
+            <form class="auth-form" data-form-name="reset">
+              <label class="field">
+                <span>Email</span>
+                <input type="email" name="email" placeholder="name@company.com" required />
+              </label>
+
+              <button class="primary-button" type="submit">Отправить ссылку</button>
+
+              <p class="auth-form__hint">
+                Вспомнили пароль?
+                <button class="link-button" type="button" data-screen-target="login">
+                  Вернуться ко входу
+                </button>
+              </p>
+            </form>
+          </section>
+        </div>
+      </section>
+
+      <section class="app-view is-hidden" id="appView" aria-label="Приложение">
+        <div class="app-shell">
+          <aside class="sidebar">
+            <div class="sidebar__brand">
+              <div class="sidebar__logo">MF</div>
+              <div>
+                <strong>MindFlow</strong>
+                <span>mental wellness dashboard</span>
+              </div>
+            </div>
+
+            <nav class="bottom-nav" id="bottomNav" aria-label="Основная навигация">
+              <button class="bottom-nav__item is-active" type="button" data-tab="home">
+                <span class="bottom-nav__icon">⌂</span>
+                <span>Дом</span>
+              </button>
+              <button class="bottom-nav__item" type="button" data-tab="practices">
+                <span class="bottom-nav__icon">◌</span>
+                <span>Практики</span>
+              </button>
+              <button class="bottom-nav__item" type="button" data-tab="diary">
+                <span class="bottom-nav__icon">✎</span>
+                <span>Дневник</span>
+              </button>
+              <button class="bottom-nav__item" type="button" data-tab="places">
+                <span class="bottom-nav__icon">⌘</span>
+                <span>Места</span>
+              </button>
+              <button class="bottom-nav__item" type="button" data-tab="profile">
+                <span class="bottom-nav__icon">◔</span>
+                <span>Профиль</span>
+              </button>
+              <button class="bottom-nav__item is-hidden" type="button" data-admin-nav="dashboard">
+                <span class="bottom-nav__icon">▣</span>
+                <span>Управление</span>
+              </button>
+              <button class="bottom-nav__item is-hidden" type="button" data-admin-nav="profile">
+                <span class="bottom-nav__icon">◔</span>
+                <span>Профиль</span>
+              </button>
+            </nav>
+
+            <div class="sidebar__footer">
+              <p>Левая панель управления всегда под рукой на desktop.</p>
+              <button
+                class="secondary-button sidebar__admin-button"
+                type="button"
+                id="sidebarAdminToggle"
+              >
+                Открыть админку
+              </button>
+            </div>
+          </aside>
+
+          <div class="phone-shell">
+            <div class="app-topbar">
+              <div class="app-topbar__signals">
+                <div class="app-topbar__signal"></div>
+                <div class="app-topbar__signal app-topbar__signal--dots"></div>
+              </div>
+              <button
+                class="app-topbar__mode-button"
+                type="button"
+                id="globalAdminToggle"
+              >
+                Админка
+              </button>
+            </div>
+
+            <div class="app-status is-hidden" id="appStatus" aria-live="polite"></div>
+
+            <div class="app-content" id="appContent"></div>
+
+            <section class="reel-overlay is-hidden" id="reelOverlay" aria-label="Reel viewer">
+              <div class="reel-overlay__backdrop" data-reel-close="true"></div>
+              <article class="reel-player" id="reelPlayer">
+                <div class="reel-player__media" id="reelMedia">
+                  <video
+                    class="reel-player__video is-hidden"
+                    id="reelVideo"
+                    playsinline
+                    muted
+                    preload="metadata"
+                  ></video>
+                </div>
+                <div class="reel-player__top">
+                  <div class="reel-player__progress">
+                    <span id="reelProgressBar"></span>
+                  </div>
+                  <button class="reel-player__close" type="button" id="reelCloseButton">
+                    Закрыть
+                  </button>
+                </div>
+                <div class="reel-player__content">
+                  <p class="reel-player__eyebrow" id="reelEyebrow">Категория</p>
+                  <h2 id="reelTitle">Заголовок</h2>
+                  <p id="reelDescription">Описание reel-контента.</p>
+                </div>
+              </article>
+            </section>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="./script.js"></script>
+  </body>
+</html>
