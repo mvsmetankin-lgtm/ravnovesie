@@ -31,6 +31,7 @@ const screens = document.querySelectorAll("[data-screen]");
 const forms = document.querySelectorAll(".auth-form");
 const bottomNavButtons = document.querySelectorAll("[data-tab]");
 const adminNavButtons = document.querySelectorAll("[data-admin-nav]");
+const navContainers = document.querySelectorAll(".bottom-nav");
 
 const state = {
   authScreen: "login",
@@ -381,7 +382,9 @@ function updateAdminToggleButtons() {
 
 function updateNavigationVisibility() {
   const admin = isAdminUser();
-  bottomNav?.classList.toggle("is-admin-only", admin && state.isAdminMode);
+  navContainers.forEach((container) => {
+    container.classList.toggle("is-admin-only", admin && state.isAdminMode);
+  });
 
   bottomNavButtons.forEach((button) => {
     button.classList.toggle("is-hidden", admin);
