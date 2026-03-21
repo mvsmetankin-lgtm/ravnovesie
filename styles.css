@@ -329,6 +329,8 @@ button {
   display: flex;
   justify-content: center;
   width: 100%;
+  position: relative;
+  overflow: visible;
 }
 
 .app-shell {
@@ -1298,6 +1300,7 @@ button {
 
 .mobile-bottom-nav {
   display: none;
+  pointer-events: auto;
 }
 
 .bottom-nav.is-admin-only {
