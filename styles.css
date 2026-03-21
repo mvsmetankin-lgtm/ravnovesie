@@ -1338,8 +1338,14 @@ button {
 }
 
 .bottom-nav__icon {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
   font-size: 20px;
   line-height: 1;
+  text-align: center;
 }
 
 @media (max-width: 1024px) {
@@ -1434,6 +1440,12 @@ button {
     gap: 4px;
     padding: 8px 2px;
     font-size: 10px;
+  }
+
+  .bottom-nav__icon {
+    width: 22px;
+    height: 22px;
+    font-size: 18px;
   }
 
   .bottom-nav__item:hover,
