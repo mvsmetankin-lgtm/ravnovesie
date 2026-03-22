@@ -1410,21 +1410,18 @@ button {
   }
 
   .bottom-nav {
-    display: grid;
+    display: flex;
+    justify-content: space-evenly;
+    align-items: flex-start;
     position: fixed;
     left: 50%;
     transform: translateX(-50%);
-    width: min(92vw, 360px);
-    max-width: calc(
-      100vw - max(28px, env(safe-area-inset-left, 0px) + env(safe-area-inset-right, 0px) + 24px)
-    );
+    width: min(calc(100vw - 28px), 390px);
     bottom: max(14px, env(safe-area-inset-bottom, 0px));
     z-index: 40;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
-    gap: clamp(2px, 1.2vw, 8px);
     padding:
       clamp(8px, 2.2vw, 11px)
-      clamp(6px, 1.8vw, 10px)
+      clamp(4px, 1vw, 8px)
       calc(clamp(10px, 2.4vw, 13px) + env(safe-area-inset-bottom, 0px) * 0.12);
     border-radius: 30px;
     background: rgba(255, 255, 255, 0.92);
@@ -1433,7 +1430,6 @@ button {
       0 18px 40px rgba(90, 121, 184, 0.16),
       inset 0 1px 0 rgba(255, 255, 255, 0.72);
     border: 1px solid rgba(75, 140, 255, 0.06);
-    justify-items: stretch;
   }
 
   .sidebar .bottom-nav {
@@ -1445,7 +1441,7 @@ button {
   }
 
   .bottom-nav.is-admin-only {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    justify-content: space-evenly;
   }
 
   .bottom-nav__item {
@@ -1455,6 +1451,7 @@ button {
     align-items: start;
     gap: 4px;
     padding: 6px 4px 4px;
+    flex: 0 0 clamp(56px, 14vw, 68px);
     font-size: 11px;
     font-weight: 700;
     text-align: center;
