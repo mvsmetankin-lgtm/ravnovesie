@@ -1282,6 +1282,11 @@ button {
 }
 
 .bottom-nav__icon {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
   font-size: 20px;
   line-height: 1;
 }
@@ -1359,10 +1364,19 @@ button {
 
   .bottom-nav__item {
     display: grid;
+    grid-template-rows: 24px auto;
     justify-items: center;
     gap: 4px;
+    min-width: 0;
+    width: 100%;
     padding: 8px 2px;
     font-size: 10px;
+  }
+
+  .bottom-nav__item span:last-child {
+    width: 100%;
+    text-align: center;
+    line-height: 1.2;
   }
 
   .bottom-nav__item:hover,
