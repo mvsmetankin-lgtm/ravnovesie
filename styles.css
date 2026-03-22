@@ -1410,10 +1410,9 @@ button {
   }
 
   .bottom-nav {
-    display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
-    align-items: start;
-    justify-items: stretch;
+    display: flex;
+    justify-content: space-evenly;
+    align-items: flex-start;
     position: fixed;
     left: 50%;
     transform: translateX(-50%);
@@ -1422,7 +1421,7 @@ button {
     z-index: 40;
     padding:
       clamp(8px, 2.2vw, 11px)
-      clamp(4px, 1vw, 8px)
+      0
       calc(clamp(10px, 2.4vw, 13px) + env(safe-area-inset-bottom, 0px) * 0.12);
     border-radius: 30px;
     background: rgba(255, 255, 255, 0.92);
@@ -1438,12 +1437,12 @@ button {
   }
 
   .mobile-bottom-nav {
-    display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    display: flex;
+    flex-direction: row;
   }
 
   .bottom-nav.is-admin-only {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    justify-content: space-evenly;
   }
 
   .bottom-nav__item {
@@ -1453,8 +1452,9 @@ button {
     align-items: start;
     gap: 4px;
     padding: 6px 4px 4px;
-    width: 100%;
-    min-width: 0;
+    flex: 0 0 clamp(56px, 15.6vw, 68px);
+    width: clamp(56px, 15.6vw, 68px);
+    min-width: clamp(56px, 15.6vw, 68px);
     font-size: 11px;
     font-weight: 700;
     text-align: center;
