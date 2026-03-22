@@ -1492,8 +1492,8 @@ button {
   }
 
   .bottom-nav__item.is-active .bottom-nav__icon {
-    background: rgba(75, 140, 255, 0.12);
-    box-shadow: inset 0 0 0 1px rgba(75, 140, 255, 0.08);
+    background: transparent;
+    box-shadow: none;
   }
 
   .admin-summary,
