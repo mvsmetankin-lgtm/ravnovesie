@@ -1355,7 +1355,9 @@ function renderHomeScreen(data) {
 
       <section class="quick-actions" aria-label="Быстрые действия">
         <button class="quick-action quick-action--green" type="button">🍃 Тревожная кнопка</button>
-        <button class="quick-action" type="button">✍️ Сделай запись в дневнике эмоций</button>
+        <button class="quick-action" type="button" data-home-action="open-chat">
+          ✍️ Сделай запись в дневнике эмоций
+        </button>
         <button class="quick-action" type="button">✅ Тест на тревожность</button>
       </section>
 
@@ -1387,6 +1389,10 @@ function renderHomeScreen(data) {
       </section>
     </section>
   `;
+
+  appContent.querySelector('[data-home-action="open-chat"]')?.addEventListener("click", () => {
+    navigateTo("diary");
+  });
 
   const categoryCards = appContent.querySelectorAll("[data-category-reel]");
   categoryCards.forEach((card, index) => {
