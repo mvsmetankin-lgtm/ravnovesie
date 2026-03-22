@@ -73,7 +73,7 @@ const authScreenMessages = {
 const tabLabels = {
   home: "Главная",
   practices: "Практики",
-  diary: "Дневник",
+  diary: "Чат",
   places: "Места",
   profile: "Профиль",
 };
@@ -1075,7 +1075,7 @@ function renderDiaryScreen() {
     <section class="diary-screen">
       <header class="tab-header">
         <div>
-          <h1>Дневник</h1>
+          <h1>Чат</h1>
           <p class="diary-subtitle">Место, где можно выгрузить мысли и настроить свою цель на день.</p>
         </div>
         ${getAvatarMarkup(state.profile, state.session?.user)}
@@ -1439,7 +1439,7 @@ function renderTabScreen(tabName) {
 
   const titles = {
     practices: "Практики",
-    diary: "Дневник",
+    diary: "Чат",
     places: "Места",
     profile: "Профиль",
   };
