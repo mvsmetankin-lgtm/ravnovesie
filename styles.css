@@ -1437,7 +1437,8 @@ button {
   }
 
   .mobile-bottom-nav {
-    display: grid;
+    display: flex;
+    flex-direction: row;
   }
 
   .bottom-nav.is-admin-only {
