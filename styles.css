@@ -1450,22 +1450,28 @@ button {
 
   .bottom-nav__item {
     display: grid;
-    grid-template-rows: 22px 28px;
+    grid-template-rows: 34px 28px;
     justify-items: center;
     align-items: start;
-    gap: 5px;
-    padding: 8px 4px 6px;
+    gap: 4px;
+    padding: 6px 4px 4px;
     font-size: 11px;
     font-weight: 700;
     text-align: center;
-    border-radius: 18px;
     color: #7d8ba8;
   }
 
   .bottom-nav__icon {
-    width: 22px;
-    height: 22px;
+    width: 34px;
+    height: 34px;
+    border-radius: 16px;
+    padding: 6px;
+    background: transparent;
     justify-self: center;
+    transition:
+      background-color 160ms ease,
+      color 160ms ease,
+      box-shadow 160ms ease;
   }
 
   .bottom-nav__item > span:not(.bottom-nav__icon) {
@@ -1484,8 +1490,11 @@ button {
   }
 
   .bottom-nav__item.is-active {
-    background: rgba(75, 140, 255, 0.1);
     color: var(--accent-strong);
+  }
+
+  .bottom-nav__item.is-active .bottom-nav__icon {
+    background: rgba(75, 140, 255, 0.12);
     box-shadow: inset 0 0 0 1px rgba(75, 140, 255, 0.08);
   }
 
