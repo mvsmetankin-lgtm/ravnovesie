@@ -1410,9 +1410,10 @@ button {
   }
 
   .bottom-nav {
-    display: flex;
-    justify-content: space-evenly;
-    align-items: flex-start;
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    align-items: start;
+    justify-items: stretch;
     position: fixed;
     left: 50%;
     transform: translateX(-50%);
@@ -1437,12 +1438,12 @@ button {
   }
 
   .mobile-bottom-nav {
-    display: flex;
-    flex-direction: row;
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
   }
 
   .bottom-nav.is-admin-only {
-    justify-content: space-evenly;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .bottom-nav__item {
@@ -1452,7 +1453,8 @@ button {
     align-items: start;
     gap: 4px;
     padding: 6px 4px 4px;
-    flex: 0 0 clamp(56px, 14vw, 68px);
+    width: 100%;
+    min-width: 0;
     font-size: 11px;
     font-weight: 700;
     text-align: center;
