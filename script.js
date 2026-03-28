@@ -45,6 +45,8 @@ const state = {
   diaryData: null,
   diaryFilter: "all",
   diaryEditingId: null,
+  chatMessages: [],
+  chatBusy: false,
   adminUserEditingId: null,
   isEnteringApp: false,
   isAdminMode: false,
@@ -1001,240 +1003,198 @@ function renderEmptyHome(profile, authUser) {
   });
 }
 
-function renderDiaryScreen() {
-  const diary = state.diaryData || DEFAULT_HOME_CONTENT.diary;
-  const entries = diary.entries || [];
-  const filteredEntries = filterDiaryEntries(entries, state.diaryFilter);
-  const latestEntry = entries[0] || null;
-  const editingEntry = entries.find((entry) => entry.id === state.diaryEditingId) || null;
-  const todayWords = entries
-    .filter((entry) => entry.created_at.slice(0, 10) === new Date().toISOString().slice(0, 10))
-    .reduce((sum, entry) => sum + (entry.word_count || 0), 0);
-  const streak = Math.max(
-    0,
-    entries.reduce((days, entry, index, arr) => {
-      if (index === 0) {
-        return 1;
-      }
+const CHAT_SUGGESTIONS = [
+  "Мне тревожно и трудно собраться. Помоги успокоиться.",
+  "Задай мне 3 вопроса, чтобы я лучше понял, что чувствую.",
+  "Помоги мягко разобрать мой день и выделить главное.",
+];
 
-      const prev = new Date(arr[index - 1].created_at);
-      const current = new Date(entry.created_at);
-      const diff = Math.round((prev - current) / 86400000);
-      return diff <= 1 ? days + 1 : days;
-    }, entries.length ? 1 : 0),
-  );
-  const tagCounts = entries.flatMap((entry) => entry.emotion_tags || []);
-  const topTag =
-    tagCounts.sort(
-      (a, b) =>
-        tagCounts.filter((item) => item === b).length -
-        tagCounts.filter((item) => item === a).length,
-    )[0] || "Спокойствие";
-  const filterMarkup = getDiaryFilterOptions()
-    .map((filter) => {
-      const activeClass = filter.id === state.diaryFilter ? " is-active" : "";
-      return `<button class="diary-filter${activeClass}" type="button" data-diary-filter="${escapeHtml(
-        filter.id,
-      )}">${escapeHtml(filter.label)}</button>`;
+function createChatMessage(role, content) {
+  return {
+    id: `chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    role,
+    content: String(content || "").trim(),
+    createdAt: new Date().toISOString(),
+  };
+}
+
+function ensureChatMessages() {
+  if (state.chatMessages.length) {
+    return;
+  }
+
+  const firstName = state.profile?.first_name || "друг";
+  state.chatMessages = [
+    createChatMessage(
+      "assistant",
+      `Привет, ${firstName}. Я рядом и готов помочь. Можешь написать, что сейчас тревожит, попросить поддержку или просто начать с пары слов о своём состоянии.`,
+    ),
+  ];
+}
+
+async function requestChatReply() {
+  const payload = await apiRequest("/api/chat", {
+    method: "POST",
+    body: JSON.stringify({
+      messages: state.chatMessages.map(({ role, content }) => ({ role, content })),
+    }),
+  });
+
+  return payload.message;
+}
+
+async function sendChatMessage(content) {
+  const text = String(content || "").trim();
+  if (!text || state.chatBusy) {
+    return;
+  }
+
+  ensureChatMessages();
+  state.chatMessages = [...state.chatMessages, createChatMessage("user", text)];
+  state.chatBusy = true;
+  renderDiaryScreen();
+
+  try {
+    const assistantMessage = await requestChatReply();
+    state.chatMessages = [
+      ...state.chatMessages,
+      createChatMessage("assistant", assistantMessage?.content || ""),
+    ];
+    setAppStatus("Ответ готов.", "success");
+  } catch (error) {
+    state.chatMessages = [
+      ...state.chatMessages,
+      createChatMessage(
+        "assistant",
+        "Сейчас не получилось получить ответ модели. Попробуй повторить сообщение ещё раз через пару секунд.",
+      ),
+    ];
+    setAppStatus(error.message || "Не удалось получить ответ модели.", "error");
+  } finally {
+    state.chatBusy = false;
+    renderDiaryScreen();
+  }
+}
+
+function scrollChatToBottom() {
+  const thread = document.getElementById("chatThread");
+  if (!thread) {
+    return;
+  }
+
+  thread.scrollTop = thread.scrollHeight;
+}
+
+function renderDiaryScreen() {
+  ensureChatMessages();
+
+  const messagesMarkup = state.chatMessages
+    .map((message) => {
+      const isUser = message.role === "user";
+      return `
+        <article class="chat-message chat-message--${isUser ? "user" : "assistant"}">
+          <div class="chat-bubble chat-bubble--${isUser ? "user" : "assistant"}">
+            <p>${escapeHtml(message.content)}</p>
+          </div>
+        </article>
+      `;
     })
     .join("");
-  const historyMarkup = filteredEntries.length
-    ? filteredEntries
-        .map((entry) => {
-          const preview =
-            entry.content.length > 140 ? `${entry.content.slice(0, 140)}...` : entry.content;
 
-          return `
-            <article class="diary-entry">
-              <div class="diary-entry__meta">
-                <strong>${escapeHtml(formatEntryDate(entry.created_at))}</strong>
-                <span>${escapeHtml(String(entry.word_count || 0))} слов</span>
-              </div>
-              <p>${escapeHtml(preview)}</p>
-              <div class="diary-tags">
-                ${(entry.emotion_tags || [])
-                  .map((tag) => `<span>${escapeHtml(tag)}</span>`)
-                  .join("")}
-              </div>
-              <div class="diary-entry__actions">
-                <button class="secondary-button" type="button" data-diary-edit="${escapeHtml(entry.id)}">Редактировать</button>
-                <button class="secondary-button" type="button" data-diary-delete="${escapeHtml(entry.id)}">Удалить</button>
-              </div>
-            </article>
-          `;
-        })
-        .join("")
-    : `
-      <article class="placeholder-card">
-        <h3>Пока нет записей</h3>
-        <p>Начни с короткой заметки о том, что чувствуешь прямо сейчас.</p>
-      </article>
-    `;
+  const suggestionsMarkup = CHAT_SUGGESTIONS.map(
+    (prompt) => `
+      <button class="chat-suggestion" type="button" data-chat-prompt="${escapeHtml(prompt)}">
+        ${escapeHtml(prompt)}
+      </button>
+    `,
+  ).join("");
 
   appContent.innerHTML = `
-    <section class="diary-screen">
+    <section class="chat-screen">
       <header class="tab-header">
         <div>
           <h1>Чат</h1>
-          <p class="diary-subtitle">Место, где можно выгрузить мысли и настроить свою цель на день.</p>
+          <p class="chat-subtitle">
+            Диалог с AI-помощником, где можно выговориться, разложить мысли и получить спокойный ответ.
+          </p>
         </div>
         ${getAvatarMarkup(state.profile, state.session?.user)}
       </header>
 
-      <section class="diary-grid">
-        <article class="diary-goal-card">
-          <h3>Цель на сегодня</h3>
-          <p class="diary-goal-card__value">${escapeHtml(String(todayWords))} / ${escapeHtml(
-            String(diary.goal || 110),
-          )} слов</p>
-          <form class="diary-goal-form" id="diaryGoalForm">
-            <input type="number" min="10" step="10" name="goal_words" value="${escapeHtml(
-              String(diary.goal || 110),
-            )}" />
-            <button class="secondary-button" type="submit">Изменить цель</button>
-          </form>
-        </article>
+      <section class="chat-layout">
+        <aside class="chat-sidebar">
+          <div class="chat-sidebar__card">
+            <h3>Что можно написать</h3>
+            <p>Опиши своё состояние, попроси поддержку, разбор ситуации или мягкий план на ближайший час.</p>
+          </div>
+          <div class="chat-sidebar__card">
+            <h3>Быстрый старт</h3>
+            <div class="chat-suggestions">
+              ${suggestionsMarkup}
+            </div>
+          </div>
+        </aside>
 
-        <article class="diary-editor-card">
-          <h3>${editingEntry ? "Редактирование записи" : "Новая запись"}</h3>
-          <form class="diary-entry-form" id="diaryEntryForm">
+        <section class="chat-shell">
+          <div class="chat-thread" id="chatThread">
+            ${messagesMarkup}
+            ${
+              state.chatBusy
+                ? `
+              <article class="chat-message chat-message--assistant">
+                <div class="chat-bubble chat-bubble--assistant chat-bubble--typing">
+                  <span></span><span></span><span></span>
+                </div>
+              </article>
+            `
+                : ""
+            }
+          </div>
+
+          <form class="chat-composer" id="chatComposer">
             <textarea
-              name="content"
-              rows="7"
-              placeholder="Что ты сейчас чувствуешь?"
+              id="chatInput"
+              name="message"
+              rows="4"
+              placeholder="Напиши, что сейчас происходит, чего ты боишься или в чём нужна помощь..."
+              ${state.chatBusy ? "disabled" : ""}
               required
-            >${escapeHtml(editingEntry?.content || "")}</textarea>
-            <div class="diary-tag-picker">
-              ${["Тревога", "Спокойствие", "Усталость", "Радость", "Не могу понять"]
-                .map((tag) => {
-                  const checked = (editingEntry?.emotion_tags || []).includes(tag)
-                    ? "checked"
-                    : "";
-                  return `<label><input type="checkbox" name="emotion_tags" value="${escapeHtml(
-                    tag,
-                  )}" ${checked} />${escapeHtml(tag)}</label>`;
-                })
-                .join("")}
-            </div>
-            <div class="diary-entry-form__actions">
-              <button class="primary-button" type="submit">
-                ${editingEntry ? "Сохранить изменения" : "Сохранить запись"}
+            ></textarea>
+            <div class="chat-composer__actions">
+              <p class="chat-composer__hint">Enter отправит сообщение, Shift + Enter добавит новую строку.</p>
+              <button class="primary-button" type="submit" ${state.chatBusy ? "disabled" : ""}>
+                ${state.chatBusy ? "Думаю..." : "Отправить"}
               </button>
-              ${
-                editingEntry
-                  ? '<button class="secondary-button" type="button" id="cancelDiaryEdit">Отмена</button>'
-                  : ""
-              }
             </div>
           </form>
-        </article>
-      </section>
-
-      <section class="diary-grid">
-        <article class="diary-insights-card">
-          <h3>Инсайты</h3>
-          <div class="diary-insights">
-            <p>Серия записей: <strong>${escapeHtml(String(streak))} дней</strong></p>
-            <p>Чаще всего встречается: <strong>${escapeHtml(topTag)}</strong></p>
-            <p>Последняя запись: <strong>${escapeHtml(
-              latestEntry ? `${latestEntry.word_count} слов` : "пока нет",
-            )}</strong></p>
-          </div>
-        </article>
-
-        <article class="diary-history-card">
-          <div class="section-title">
-            <h2>История записей</h2>
-          </div>
-          <div class="diary-filters">
-            ${filterMarkup}
-          </div>
-          <div class="diary-history">
-            ${historyMarkup}
-          </div>
-        </article>
+        </section>
       </section>
     </section>
   `;
 
-  document.getElementById("diaryGoalForm")?.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const form = event.currentTarget;
-    const goal = Number(new FormData(form).get("goal_words") || 110);
+  const chatInput = document.getElementById("chatInput");
+  const chatComposer = document.getElementById("chatComposer");
 
-    try {
-      await saveDiaryGoal(goal);
-      setAppStatus("Цель обновлена.", "success");
-      await refreshHomeFeed();
-      await loadDiaryData();
-      renderDiaryScreen();
-    } catch (error) {
-      setAppStatus(error.message || "Не удалось обновить цель.", "error");
+  chatComposer?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const formData = new FormData(event.currentTarget);
+    await sendChatMessage(formData.get("message"));
+  });
+
+  chatInput?.addEventListener("keydown", async (event) => {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      await sendChatMessage(chatInput.value);
     }
   });
 
-  document.getElementById("diaryEntryForm")?.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const form = event.currentTarget;
-    const formData = new FormData(form);
-
-    try {
-      if (state.diaryEditingId) {
-        await updateDiaryEntry(state.diaryEditingId, {
-          content: formData.get("content")?.toString().trim() || "",
-          emotion_tags: formData.getAll("emotion_tags").map(String),
-        });
-      } else {
-        await createDiaryEntry({
-          content: formData.get("content")?.toString().trim() || "",
-          emotion_tags: formData.getAll("emotion_tags").map(String),
-        });
-      }
-      state.diaryEditingId = null;
-      setAppStatus("Запись сохранена.", "success");
-      await refreshHomeFeed();
-      await loadDiaryData();
-      renderDiaryScreen();
-    } catch (error) {
-      setAppStatus(error.message || "Не удалось сохранить запись.", "error");
-    }
-  });
-
-  document.getElementById("cancelDiaryEdit")?.addEventListener("click", () => {
-    state.diaryEditingId = null;
-    renderDiaryScreen();
-  });
-
-  appContent.querySelectorAll("[data-diary-filter]").forEach((button) => {
-    button.addEventListener("click", () => {
-      state.diaryFilter = button.dataset.diaryFilter;
-      renderDiaryScreen();
-    });
-  });
-
-  appContent.querySelectorAll("[data-diary-edit]").forEach((button) => {
-    button.addEventListener("click", () => {
-      state.diaryEditingId = button.dataset.diaryEdit;
-      renderDiaryScreen();
-    });
-  });
-
-  appContent.querySelectorAll("[data-diary-delete]").forEach((button) => {
+  appContent.querySelectorAll("[data-chat-prompt]").forEach((button) => {
     button.addEventListener("click", async () => {
-      try {
-        await deleteDiaryEntry(button.dataset.diaryDelete);
-        if (state.diaryEditingId === button.dataset.diaryDelete) {
-          state.diaryEditingId = null;
-        }
-        setAppStatus("Запись удалена.", "success");
-        await refreshHomeFeed();
-        await loadDiaryData();
-        renderDiaryScreen();
-      } catch (error) {
-        setAppStatus(error.message || "Не удалось удалить запись.", "error");
-      }
+      await sendChatMessage(button.dataset.chatPrompt || "");
     });
   });
+
+  requestAnimationFrame(scrollChatToBottom);
 }
 
 function renderHomeScreen(data) {
@@ -1452,7 +1412,7 @@ function renderTabScreen(tabName) {
 
   const descriptions = {
     practices: "Здесь появятся полные подборки упражнений, звуков и курсов.",
-    diary: "Личное пространство записей, целей и эмоциональных наблюдений.",
+    diary: "Поддерживающий чат с AI-помощником, где можно выговориться и получить спокойный ответ.",
     places: "Раздел мест можно наполнить безопасными пространствами и точками восстановления.",
     profile:
       "Профиль уже связан с Supabase и может показывать данные пользователя, настройки и выход.",
@@ -1983,6 +1943,8 @@ async function logout() {
   state.diaryData = null;
   state.diaryFilter = "all";
   state.diaryEditingId = null;
+  state.chatMessages = [];
+  state.chatBusy = false;
   state.isAdminMode = false;
   state.adminSection = "dashboard";
   pageShell.classList.remove("is-app-mode");

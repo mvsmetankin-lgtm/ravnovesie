@@ -9,11 +9,19 @@ const {
   TELEGRAM_BOT_TOKEN = "",
   SUPABASE_URL = "",
   SUPABASE_SERVICE_ROLE_KEY = "",
+  OPENROUTER_API_KEY = "",
+  OPENROUTER_MODEL = "qwen/qwen3.5-9b",
+  OPENROUTER_SYSTEM_PROMPT = "You are a helpful assistant. Отвечай на русском",
 } = process.env;
 
 const SUPER_ADMIN_EMAIL = "mvsmetankin@gmail.com";
 
-if (!APP_SESSION_SECRET || !TELEGRAM_BOT_TOKEN || !SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+if (
+  !APP_SESSION_SECRET ||
+  !TELEGRAM_BOT_TOKEN ||
+  !SUPABASE_URL ||
+  !SUPABASE_SERVICE_ROLE_KEY
+) {
   console.warn(
     "Telegram auth backend is not fully configured. Check APP_SESSION_SECRET, TELEGRAM_BOT_TOKEN, SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.",
   );
@@ -29,6 +37,7 @@ const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
 
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 7;
 const HOME_DEFAULT_GOAL = 110;
+const OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions";
 const ADMIN_SECTIONS = {
   categories: "categories",
   practices: "practices",
@@ -427,6 +436,47 @@ function countWords(text) {
   return trimmed.split(/\s+/).length;
 }
 
+function normalizeChatMessages(rawMessages) {
+  if (!Array.isArray(rawMessages)) {
+    return [];
+  }
+
+  return rawMessages
+    .map((message) => ({
+      role: message?.role === "assistant" ? "assistant" : "user",
+      content: String(message?.content || "").trim(),
+    }))
+    .filter((message) => message.content)
+    .slice(-12);
+}
+
+function extractOpenRouterText(payload) {
+  const content = payload?.choices?.[0]?.message?.content;
+
+  if (typeof content === "string") {
+    return content.trim();
+  }
+
+  if (Array.isArray(content)) {
+    return content
+      .map((item) => {
+        if (typeof item === "string") {
+          return item;
+        }
+
+        if (item?.type === "text") {
+          return item.text || "";
+        }
+
+        return "";
+      })
+      .join("")
+      .trim();
+  }
+
+  return "";
+}
+
 async function requireAuth(req, res, next) {
   try {
     const token = String(req.headers.authorization || "").replace(/^Bearer\s+/i, "");
@@ -624,6 +674,66 @@ app.delete("/api/diary/entries/:id", requireAuth, async (req, res) => {
     res.json({ ok: true });
   } catch (error) {
     res.status(500).json({ error: error.message || "Не удалось удалить запись." });
+  }
+});
+
+app.post("/api/chat", requireAuth, async (req, res) => {
+  try {
+    if (!OPENROUTER_API_KEY) {
+      throw new Error(
+        "OpenRouter не настроен на сервере. Добавь OPENROUTER_API_KEY в .env и перезапусти backend.",
+      );
+    }
+
+    const messages = normalizeChatMessages(req.body?.messages);
+    const lastUserMessage = [...messages].reverse().find((message) => message.role === "user");
+
+    if (!lastUserMessage) {
+      throw new Error("Сообщение пользователя не найдено.");
+    }
+
+    const response = await fetch(OPENROUTER_CHAT_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${OPENROUTER_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: OPENROUTER_MODEL,
+        messages: [
+          {
+            role: "system",
+            content: OPENROUTER_SYSTEM_PROMPT,
+          },
+          ...messages,
+        ],
+      }),
+    });
+
+    const payload = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      throw new Error(
+        payload?.error?.message ||
+          payload?.error ||
+          "OpenRouter не смог обработать запрос.",
+      );
+    }
+
+    const content = extractOpenRouterText(payload);
+
+    if (!content) {
+      throw new Error("Модель не вернула текст ответа.");
+    }
+
+    res.json({
+      message: {
+        role: "assistant",
+        content,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message || "Не удалось получить ответ модели." });
   }
 });
 
