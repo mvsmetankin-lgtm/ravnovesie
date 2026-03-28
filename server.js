@@ -1,6 +1,9 @@
 import "dotenv/config";
 import crypto from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 import express from "express";
+import { fileURLToPath } from "node:url";
 import { createClient } from "@supabase/supabase-js";
 
 const {
@@ -11,8 +14,11 @@ const {
   SUPABASE_SERVICE_ROLE_KEY = "",
   OPENROUTER_API_KEY = "",
   OPENROUTER_MODEL = "qwen/qwen3.5-9b",
-  OPENROUTER_SYSTEM_PROMPT = "You are a helpful assistant. Отвечай на русском",
+  OPENROUTER_SYSTEM_PROMPT_FILE = "./prompts/chat-system-prompt.txt",
 } = process.env;
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const SUPER_ADMIN_EMAIL = "mvsmetankin@gmail.com";
 
@@ -43,6 +49,19 @@ const ADMIN_SECTIONS = {
   practices: "practices",
   banners: "audio_banners",
 };
+
+function loadSystemPrompt() {
+  const promptPath = path.resolve(__dirname, OPENROUTER_SYSTEM_PROMPT_FILE);
+
+  try {
+    return fs.readFileSync(promptPath, "utf8").trim();
+  } catch (error) {
+    console.warn(`Не удалось прочитать системный промпт из ${promptPath}: ${error.message}`);
+    return "You are a helpful assistant. Отвечай на русском";
+  }
+}
+
+const OPENROUTER_SYSTEM_PROMPT = loadSystemPrompt();
 
 app.use(express.json({ limit: "1mb" }));
 
