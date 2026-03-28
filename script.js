@@ -1003,10 +1003,23 @@ function renderEmptyHome(profile, authUser) {
   });
 }
 
-const CHAT_SUGGESTIONS = [
-  "Мне тревожно и трудно собраться. Помоги успокоиться.",
-  "Задай мне 3 вопроса, чтобы я лучше понял, что чувствую.",
-  "Помоги мягко разобрать мой день и выделить главное.",
+const CHAT_QUICK_ACTIONS = [
+  {
+    label: "Получить консультацию психолога",
+    prompt:
+      "Мне нужна консультация психолога. Подскажи, как понять, что пора обратиться к специалисту и с чего начать.",
+    wide: true,
+  },
+  {
+    label: "Тревожная кнопка",
+    prompt:
+      "Мне тревожно прямо сейчас. Дай короткую технику, чтобы быстро снизить напряжение здесь и сейчас.",
+  },
+  {
+    label: "Сделай запись в дневнике эмоций",
+    prompt:
+      "Помоги мне оформить короткую запись в дневнике эмоций: что я чувствую, что это вызвало и что мне сейчас нужно.",
+  },
 ];
 
 function createChatMessage(role, content) {
@@ -1085,14 +1098,35 @@ function scrollChatToBottom() {
   thread.scrollTop = thread.scrollHeight;
 }
 
+function getChatAssistantAvatar() {
+  return `
+    <span class="chat-assistant-avatar" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none">
+        <rect x="5" y="4.5" width="14" height="11" rx="4.5" stroke="currentColor" stroke-width="1.8"/>
+        <path d="M9 20.5h6M12 15.5v5M9 9.5h6M10 12.5h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+      </svg>
+    </span>
+  `;
+}
+
 function renderDiaryScreen() {
   ensureChatMessages();
+  const [firstMessage, ...otherMessages] = state.chatMessages;
+  const introParagraphs = String(firstMessage?.content || "")
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const introMarkup = introParagraphs.length
+    ? introParagraphs.map((line) => `<p>${escapeHtml(line)}</p>`).join("")
+    : "<p>Привет. Я рядом, чтобы поддержать тебя.</p>";
 
-  const messagesMarkup = state.chatMessages
+  const messagesMarkup = otherMessages
     .map((message) => {
       const isUser = message.role === "user";
+
       return `
         <article class="chat-message chat-message--${isUser ? "user" : "assistant"}">
+          ${!isUser ? getChatAssistantAvatar() : ""}
           <div class="chat-bubble chat-bubble--${isUser ? "user" : "assistant"}">
             <p>${escapeHtml(message.content)}</p>
           </div>
@@ -1101,73 +1135,69 @@ function renderDiaryScreen() {
     })
     .join("");
 
-  const suggestionsMarkup = CHAT_SUGGESTIONS.map(
-    (prompt) => `
-      <button class="chat-suggestion" type="button" data-chat-prompt="${escapeHtml(prompt)}">
-        ${escapeHtml(prompt)}
+  const actionsMarkup = CHAT_QUICK_ACTIONS.map(
+    (action) => `
+      <button
+        class="chat-quick-action${action.wide ? " chat-quick-action--wide" : ""}"
+        type="button"
+        data-chat-prompt="${escapeHtml(action.prompt)}"
+      >
+        ${escapeHtml(action.label)}
       </button>
     `,
   ).join("");
 
   appContent.innerHTML = `
     <section class="chat-screen">
-      <header class="tab-header">
-        <div>
-          <h1>Чат</h1>
-          <p class="chat-subtitle">
-            Диалог с AI-помощником, где можно выговориться, разложить мысли и получить спокойный ответ.
-          </p>
-        </div>
-        ${getAvatarMarkup(state.profile, state.session?.user)}
+      <header class="chat-header">
+        <h1>Чат помощи</h1>
       </header>
 
-      <section class="chat-layout">
-        <aside class="chat-sidebar">
-          <div class="chat-sidebar__card">
-            <h3>Что можно написать</h3>
-            <p>Опиши своё состояние, попроси поддержку, разбор ситуации или мягкий план на ближайший час.</p>
+      <section class="chat-surface">
+        <article class="chat-intro">
+          ${getChatAssistantAvatar()}
+          <div class="chat-intro__content">
+            ${introMarkup}
           </div>
-          <div class="chat-sidebar__card">
-            <h3>Быстрый старт</h3>
-            <div class="chat-suggestions">
-              ${suggestionsMarkup}
-            </div>
-          </div>
-        </aside>
+        </article>
 
-        <section class="chat-shell">
-          <div class="chat-thread" id="chatThread">
-            ${messagesMarkup}
-            ${
-              state.chatBusy
-                ? `
-              <article class="chat-message chat-message--assistant">
-                <div class="chat-bubble chat-bubble--assistant chat-bubble--typing">
-                  <span></span><span></span><span></span>
-                </div>
-              </article>
-            `
-                : ""
-            }
+        <div class="chat-thread" id="chatThread">
+          ${messagesMarkup}
+          ${
+            state.chatBusy
+              ? `
+            <article class="chat-message chat-message--assistant">
+              ${getChatAssistantAvatar()}
+              <div class="chat-bubble chat-bubble--assistant chat-bubble--typing">
+                <span></span><span></span><span></span>
+              </div>
+            </article>
+          `
+              : ""
+          }
+        </div>
+
+        <div class="chat-footer">
+          <div class="chat-quick-actions">
+            ${actionsMarkup}
           </div>
 
           <form class="chat-composer" id="chatComposer">
             <textarea
               id="chatInput"
               name="message"
-              rows="4"
-              placeholder="Напиши, что сейчас происходит, чего ты боишься или в чём нужна помощь..."
+              rows="2"
+              placeholder="Ваш комментарий"
               ${state.chatBusy ? "disabled" : ""}
               required
             ></textarea>
-            <div class="chat-composer__actions">
-              <p class="chat-composer__hint">Enter отправит сообщение, Shift + Enter добавит новую строку.</p>
-              <button class="primary-button" type="submit" ${state.chatBusy ? "disabled" : ""}>
-                ${state.chatBusy ? "Думаю..." : "Отправить"}
-              </button>
-            </div>
+            <button class="chat-send-button" type="submit" ${state.chatBusy ? "disabled" : ""} aria-label="Отправить">
+              <svg viewBox="0 0 24 24" fill="none">
+                <path d="M4 19 20 12 4 5l2.5 6.2L15 12l-8.5.8L4 19Z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </button>
           </form>
-        </section>
+        </div>
       </section>
     </section>
   `;
