@@ -12,9 +12,13 @@ const {
   TELEGRAM_BOT_TOKEN = "",
   SUPABASE_URL = "",
   SUPABASE_SERVICE_ROLE_KEY = "",
+  LLM_PROVIDER = "openrouter",
+  CHAT_SYSTEM_PROMPT_FILE = "./prompts/chat-system-prompt.txt",
   OPENROUTER_API_KEY = "",
   OPENROUTER_MODEL = "qwen/qwen3.5-9b",
-  OPENROUTER_SYSTEM_PROMPT_FILE = "./prompts/chat-system-prompt.txt",
+  GIGACHAT_AUTH_KEY = "",
+  GIGACHAT_SCOPE = "GIGACHAT_API_PERS",
+  GIGACHAT_MODEL = "GigaChat-2-Pro",
 } = process.env;
 
 const __filename = fileURLToPath(import.meta.url);
@@ -44,6 +48,8 @@ const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 7;
 const HOME_DEFAULT_GOAL = 110;
 const OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions";
+const GIGACHAT_AUTH_URL = "https://ngw.devices.sberbank.ru:9443/api/v2/oauth";
+const GIGACHAT_CHAT_URL = "https://gigachat.devices.sberbank.ru/api/v1/chat/completions";
 const ADMIN_SECTIONS = {
   categories: "categories",
   practices: "practices",
@@ -51,7 +57,7 @@ const ADMIN_SECTIONS = {
 };
 
 function loadSystemPrompt() {
-  const promptPath = path.resolve(__dirname, OPENROUTER_SYSTEM_PROMPT_FILE);
+  const promptPath = path.resolve(__dirname, CHAT_SYSTEM_PROMPT_FILE);
 
   try {
     return fs.readFileSync(promptPath, "utf8").trim();
@@ -61,7 +67,11 @@ function loadSystemPrompt() {
   }
 }
 
-const OPENROUTER_SYSTEM_PROMPT = loadSystemPrompt();
+const CHAT_SYSTEM_PROMPT = loadSystemPrompt();
+const gigachatTokenCache = {
+  accessToken: "",
+  expiresAt: 0,
+};
 
 app.use(express.json({ limit: "1mb" }));
 
@@ -469,7 +479,7 @@ function normalizeChatMessages(rawMessages) {
     .slice(-12);
 }
 
-function extractOpenRouterText(payload) {
+function extractCompletionText(payload) {
   const content = payload?.choices?.[0]?.message?.content;
 
   if (typeof content === "string") {
@@ -494,6 +504,140 @@ function extractOpenRouterText(payload) {
   }
 
   return "";
+}
+
+async function getGigaChatAccessToken() {
+  const now = Date.now();
+  if (
+    gigachatTokenCache.accessToken &&
+    gigachatTokenCache.expiresAt &&
+    gigachatTokenCache.expiresAt - 60_000 > now
+  ) {
+    return gigachatTokenCache.accessToken;
+  }
+
+  if (!GIGACHAT_AUTH_KEY) {
+    throw new Error(
+      "GigaChat не настроен на сервере. Добавь GIGACHAT_AUTH_KEY в .env и перезапусти backend.",
+    );
+  }
+
+  const response = await fetch(GIGACHAT_AUTH_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      Accept: "application/json",
+      RqUID: crypto.randomUUID(),
+      Authorization: `Basic ${GIGACHAT_AUTH_KEY}`,
+    },
+    body: new URLSearchParams({
+      scope: GIGACHAT_SCOPE,
+    }),
+  });
+
+  const payload = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    throw new Error(
+      payload?.message ||
+        payload?.error_description ||
+        payload?.error ||
+        "Не удалось получить токен GigaChat.",
+    );
+  }
+
+  const accessToken = String(payload?.access_token || "");
+  const expiresAtSeconds = Number(payload?.expires_at || 0);
+
+  if (!accessToken) {
+    throw new Error("GigaChat не вернул access token.");
+  }
+
+  gigachatTokenCache.accessToken = accessToken;
+  gigachatTokenCache.expiresAt = expiresAtSeconds ? expiresAtSeconds * 1000 : now + 25 * 60_000;
+
+  return accessToken;
+}
+
+async function sendChatViaOpenRouter(messages) {
+  if (!OPENROUTER_API_KEY) {
+    throw new Error(
+      "OpenRouter не настроен на сервере. Добавь OPENROUTER_API_KEY в .env и перезапусти backend.",
+    );
+  }
+
+  const response = await fetch(OPENROUTER_CHAT_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${OPENROUTER_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: OPENROUTER_MODEL,
+      messages: [
+        {
+          role: "system",
+          content: CHAT_SYSTEM_PROMPT,
+        },
+        ...messages,
+      ],
+    }),
+  });
+
+  const payload = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    throw new Error(
+      payload?.error?.message || payload?.error || "OpenRouter не смог обработать запрос.",
+    );
+  }
+
+  const content = extractCompletionText(payload);
+
+  if (!content) {
+    throw new Error("OpenRouter не вернул текст ответа.");
+  }
+
+  return content;
+}
+
+async function sendChatViaGigaChat(messages) {
+  const accessToken = await getGigaChatAccessToken();
+
+  const response = await fetch(GIGACHAT_CHAT_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+      Authorization: `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify({
+      model: GIGACHAT_MODEL,
+      messages: [
+        {
+          role: "system",
+          content: CHAT_SYSTEM_PROMPT,
+        },
+        ...messages,
+      ],
+    }),
+  });
+
+  const payload = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    throw new Error(
+      payload?.message || payload?.error?.message || payload?.error || "GigaChat не смог обработать запрос.",
+    );
+  }
+
+  const content = extractCompletionText(payload);
+
+  if (!content) {
+    throw new Error("GigaChat не вернул текст ответа.");
+  }
+
+  return content;
 }
 
 async function requireAuth(req, res, next) {
@@ -531,6 +675,7 @@ app.get("/api/health", (_req, res) => {
 app.get("/api/config", (_req, res) => {
   res.json({
     superAdminEmail: SUPER_ADMIN_EMAIL,
+    llmProvider: LLM_PROVIDER,
   });
 });
 
@@ -698,12 +843,6 @@ app.delete("/api/diary/entries/:id", requireAuth, async (req, res) => {
 
 app.post("/api/chat", requireAuth, async (req, res) => {
   try {
-    if (!OPENROUTER_API_KEY) {
-      throw new Error(
-        "OpenRouter не настроен на сервере. Добавь OPENROUTER_API_KEY в .env и перезапусти backend.",
-      );
-    }
-
     const messages = normalizeChatMessages(req.body?.messages);
     const lastUserMessage = [...messages].reverse().find((message) => message.role === "user");
 
@@ -711,38 +850,16 @@ app.post("/api/chat", requireAuth, async (req, res) => {
       throw new Error("Сообщение пользователя не найдено.");
     }
 
-    const response = await fetch(OPENROUTER_CHAT_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${OPENROUTER_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: OPENROUTER_MODEL,
-        messages: [
-          {
-            role: "system",
-            content: OPENROUTER_SYSTEM_PROMPT,
-          },
-          ...messages,
-        ],
-      }),
-    });
+    let content = "";
 
-    const payload = await response.json().catch(() => ({}));
-
-    if (!response.ok) {
+    if (LLM_PROVIDER === "gigachat") {
+      content = await sendChatViaGigaChat(messages);
+    } else if (LLM_PROVIDER === "openrouter") {
+      content = await sendChatViaOpenRouter(messages);
+    } else {
       throw new Error(
-        payload?.error?.message ||
-          payload?.error ||
-          "OpenRouter не смог обработать запрос.",
+        "Неизвестный LLM_PROVIDER. Используй openrouter или gigachat в .env.",
       );
-    }
-
-    const content = extractOpenRouterText(payload);
-
-    if (!content) {
-      throw new Error("Модель не вернула текст ответа.");
     }
 
     res.json({
