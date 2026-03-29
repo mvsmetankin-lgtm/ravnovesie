@@ -1073,6 +1073,27 @@ button {
   padding-right: 2px;
 }
 
+.chat-session-separator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 6px 0 2px;
+}
+
+.chat-session-separator span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 28px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: rgba(75, 140, 255, 0.08);
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
 .chat-message {
   display: grid;
   gap: 10px;
@@ -1786,6 +1807,10 @@ button {
 
   .chat-thread {
     min-height: 180px;
+  }
+
+  .chat-session-separator span {
+    font-size: 11px;
   }
 
   .chat-quick-actions {

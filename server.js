@@ -47,6 +47,7 @@ const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
 
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 7;
 const HOME_DEFAULT_GOAL = 110;
+const CHAT_SESSION_TIMEOUT_MS = 60 * 60 * 1000;
 const OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions";
 const GIGACHAT_AUTH_URL = "https://ngw.devices.sberbank.ru:9443/api/v2/oauth";
 const GIGACHAT_CHAT_URL = "https://gigachat.devices.sberbank.ru/api/v1/chat/completions";
@@ -465,6 +466,10 @@ function countWords(text) {
   return trimmed.split(/\s+/).length;
 }
 
+function getChatSessionCutoffIso() {
+  return new Date(Date.now() - CHAT_SESSION_TIMEOUT_MS).toISOString();
+}
+
 function normalizeChatMessages(rawMessages) {
   if (!Array.isArray(rawMessages)) {
     return [];
@@ -477,6 +482,156 @@ function normalizeChatMessages(rawMessages) {
     }))
     .filter((message) => message.content)
     .slice(-12);
+}
+
+function buildChatIntroMessage(profile) {
+  const firstName = profile?.first_name || "друг";
+  return [
+    `Привет, ${firstName}.`,
+    "Я рядом, чтобы поддержать тебя.",
+    "Можешь рассказать, что ты сейчас чувствуешь или что тебя беспокоит — я постараюсь помочь.",
+  ].join("\n");
+}
+
+async function closeExpiredChatSessions(userId) {
+  const cutoffIso = getChatSessionCutoffIso();
+  const nowIso = new Date().toISOString();
+
+  const { error } = await supabaseAdmin
+    .from("chat_sessions")
+    .update({
+      ended_at: nowIso,
+    })
+    .eq("user_id", userId)
+    .is("ended_at", null)
+    .lt("last_message_at", cutoffIso);
+
+  if (error) {
+    throw error;
+  }
+}
+
+async function getLatestActiveChatSession(userId) {
+  const cutoffIso = getChatSessionCutoffIso();
+  const { data, error } = await supabaseAdmin
+    .from("chat_sessions")
+    .select("id, user_id, started_at, last_message_at, ended_at")
+    .eq("user_id", userId)
+    .is("ended_at", null)
+    .gte("last_message_at", cutoffIso)
+    .order("started_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  return data;
+}
+
+async function createChatSession(userId, profile) {
+  const nowIso = new Date().toISOString();
+  const { data: session, error: sessionError } = await supabaseAdmin
+    .from("chat_sessions")
+    .insert({
+      user_id: userId,
+      started_at: nowIso,
+      last_message_at: nowIso,
+    })
+    .select("id, user_id, started_at, last_message_at, ended_at")
+    .single();
+
+  if (sessionError) {
+    throw sessionError;
+  }
+
+  const introMessage = buildChatIntroMessage(profile);
+  const { error: messageError } = await supabaseAdmin.from("chat_messages").insert({
+    session_id: session.id,
+    user_id: userId,
+    role: "assistant",
+    content: introMessage,
+  });
+
+  if (messageError) {
+    throw messageError;
+  }
+
+  return session;
+}
+
+async function ensureActiveChatSession(userId, profile) {
+  await closeExpiredChatSessions(userId);
+  const existing = await getLatestActiveChatSession(userId);
+
+  if (existing) {
+    return existing;
+  }
+
+  return createChatSession(userId, profile);
+}
+
+async function getChatMessagesForSession(sessionId) {
+  const { data, error } = await supabaseAdmin
+    .from("chat_messages")
+    .select("id, session_id, user_id, role, content, created_at")
+    .eq("session_id", sessionId)
+    .order("created_at", { ascending: true });
+
+  if (error) {
+    throw error;
+  }
+
+  return data || [];
+}
+
+async function getChatHistory(userId, profile) {
+  const activeSession = await ensureActiveChatSession(userId, profile);
+
+  const { data: sessions, error: sessionsError } = await supabaseAdmin
+    .from("chat_sessions")
+    .select("id, user_id, started_at, last_message_at, ended_at")
+    .eq("user_id", userId)
+    .order("started_at", { ascending: true });
+
+  if (sessionsError) {
+    throw sessionsError;
+  }
+
+  const sessionIds = (sessions || []).map((session) => session.id);
+  let messages = [];
+
+  if (sessionIds.length) {
+    const { data: fetchedMessages, error: messagesError } = await supabaseAdmin
+      .from("chat_messages")
+      .select("id, session_id, user_id, role, content, created_at")
+      .in("session_id", sessionIds)
+      .order("created_at", { ascending: true });
+
+    if (messagesError) {
+      throw messagesError;
+    }
+
+    messages = fetchedMessages || [];
+  }
+
+  const messagesBySession = messages.reduce((accumulator, message) => {
+    if (!accumulator[message.session_id]) {
+      accumulator[message.session_id] = [];
+    }
+
+    accumulator[message.session_id].push(message);
+    return accumulator;
+  }, {});
+
+  return {
+    activeSessionId: activeSession.id,
+    sessions: (sessions || []).map((session) => ({
+      ...session,
+      messages: messagesBySession[session.id] || [],
+    })),
+  };
 }
 
 function extractCompletionText(payload) {
@@ -841,31 +996,109 @@ app.delete("/api/diary/entries/:id", requireAuth, async (req, res) => {
   }
 });
 
+app.get("/api/chat", requireAuth, async (req, res) => {
+  try {
+    const profile = await getProfile(req.auth.sub);
+    const chat = await getChatHistory(req.auth.sub, profile);
+    res.json(chat);
+  } catch (error) {
+    res.status(500).json({ error: error.message || "Не удалось загрузить историю чата." });
+  }
+});
+
 app.post("/api/chat", requireAuth, async (req, res) => {
   try {
-    const messages = normalizeChatMessages(req.body?.messages);
-    const lastUserMessage = [...messages].reverse().find((message) => message.role === "user");
-
-    if (!lastUserMessage) {
+    const content = String(req.body?.content || "").trim();
+    if (!content) {
       throw new Error("Сообщение пользователя не найдено.");
     }
 
-    let content = "";
+    const profile = await getProfile(req.auth.sub);
+    const activeSession = await ensureActiveChatSession(req.auth.sub, profile);
+    const savedMessages = await getChatMessagesForSession(activeSession.id);
+
+    const userInsertTime = new Date().toISOString();
+    const { data: userMessage, error: userInsertError } = await supabaseAdmin
+      .from("chat_messages")
+      .insert({
+        session_id: activeSession.id,
+        user_id: req.auth.sub,
+        role: "user",
+        content,
+        created_at: userInsertTime,
+      })
+      .select("id, session_id, user_id, role, content, created_at")
+      .single();
+
+    if (userInsertError) {
+      throw userInsertError;
+    }
+
+    const { error: userSessionUpdateError } = await supabaseAdmin
+      .from("chat_sessions")
+      .update({
+        last_message_at: userInsertTime,
+        ended_at: null,
+      })
+      .eq("id", activeSession.id);
+
+    if (userSessionUpdateError) {
+      throw userSessionUpdateError;
+    }
+
+    const llmMessages = normalizeChatMessages([
+      ...savedMessages,
+      userMessage,
+    ]);
+
+    let assistantContent = "";
 
     if (LLM_PROVIDER === "gigachat") {
-      content = await sendChatViaGigaChat(messages);
+      assistantContent = await sendChatViaGigaChat(llmMessages);
     } else if (LLM_PROVIDER === "openrouter") {
-      content = await sendChatViaOpenRouter(messages);
+      assistantContent = await sendChatViaOpenRouter(llmMessages);
     } else {
       throw new Error(
         "Неизвестный LLM_PROVIDER. Используй openrouter или gigachat в .env.",
       );
     }
 
-    res.json({
-      message: {
+    const assistantInsertTime = new Date().toISOString();
+    const { data: assistantMessage, error: assistantInsertError } = await supabaseAdmin
+      .from("chat_messages")
+      .insert({
+        session_id: activeSession.id,
+        user_id: req.auth.sub,
         role: "assistant",
-        content,
+        content: assistantContent,
+        created_at: assistantInsertTime,
+      })
+      .select("id, session_id, user_id, role, content, created_at")
+      .single();
+
+    if (assistantInsertError) {
+      throw assistantInsertError;
+    }
+
+    const { data: updatedSession, error: sessionUpdateError } = await supabaseAdmin
+      .from("chat_sessions")
+      .update({
+        last_message_at: assistantInsertTime,
+        ended_at: null,
+      })
+      .eq("id", activeSession.id)
+      .select("id, user_id, started_at, last_message_at, ended_at")
+      .single();
+
+    if (sessionUpdateError) {
+      throw sessionUpdateError;
+    }
+
+    res.json({
+      activeSessionId: updatedSession.id,
+      session: {
+        ...updatedSession,
+        messages: [...savedMessages, userMessage, assistantMessage],
       },
     });
   } catch (error) {

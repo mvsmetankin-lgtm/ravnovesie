@@ -45,7 +45,8 @@ const state = {
   diaryData: null,
   diaryFilter: "all",
   diaryEditingId: null,
-  chatMessages: [],
+  chatData: null,
+  chatState: "idle",
   chatBusy: false,
   adminUserEditingId: null,
   isEnteringApp: false,
@@ -1022,66 +1023,125 @@ const CHAT_QUICK_ACTIONS = [
   },
 ];
 
-function createChatMessage(role, content) {
-  return {
-    id: `chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    role,
-    content: String(content || "").trim(),
-    createdAt: new Date().toISOString(),
-  };
+function getChatSessions() {
+  return Array.isArray(state.chatData?.sessions) ? state.chatData.sessions : [];
 }
 
-function ensureChatMessages() {
-  if (state.chatMessages.length) {
-    return;
+function getActiveChatSession() {
+  const sessions = getChatSessions();
+  return (
+    sessions.find((session) => session.id === state.chatData?.activeSessionId) ||
+    sessions[sessions.length - 1] ||
+    null
+  );
+}
+
+function isSessionStart(session) {
+  return !session?.messages?.some((message) => message.role === "user");
+}
+
+function formatChatSessionLabel(session, index) {
+  const startedAt = session?.started_at ? new Date(session.started_at) : null;
+  if (!startedAt || Number.isNaN(startedAt.getTime())) {
+    return `Сессия ${index + 1}`;
   }
 
-  const firstName = state.profile?.first_name || "друг";
-  state.chatMessages = [
-    createChatMessage(
-      "assistant",
-      `Привет, ${firstName}. Я рядом и готов помочь. Можешь написать, что сейчас тревожит, попросить поддержку или просто начать с пары слов о своём состоянии.`,
-    ),
-  ];
+  return `Сессия ${startedAt.toLocaleDateString("ru-RU", {
+    day: "numeric",
+    month: "long",
+  })}, ${startedAt.toLocaleTimeString("ru-RU", {
+    hour: "2-digit",
+    minute: "2-digit",
+  })}`;
 }
 
-async function requestChatReply() {
-  const payload = await apiRequest("/api/chat", {
-    method: "POST",
-    body: JSON.stringify({
-      messages: state.chatMessages.map(({ role, content }) => ({ role, content })),
-    }),
-  });
+function updateChatSessionInState(nextSession, activeSessionId = nextSession?.id) {
+  const sessions = getChatSessions();
+  const existingIndex = sessions.findIndex((session) => session.id === nextSession.id);
+  const nextSessions = [...sessions];
 
-  return payload.message;
+  if (existingIndex === -1) {
+    nextSessions.push(nextSession);
+  } else {
+    nextSessions[existingIndex] = nextSession;
+  }
+
+  state.chatData = {
+    activeSessionId: activeSessionId || state.chatData?.activeSessionId || nextSession.id,
+    sessions: nextSessions.sort(
+      (left, right) => new Date(left.started_at).getTime() - new Date(right.started_at).getTime(),
+    ),
+  };
+  state.chatState = "ready";
+}
+
+async function loadChatData() {
+  state.chatState = "loading";
+  const payload = await apiRequest("/api/chat");
+  state.chatData = payload;
+  state.chatState = "ready";
+  return payload;
+}
+
+function getChatAssistantAvatarMarkup() {
+  return `
+    <span class="chat-assistant-avatar" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none">
+        <rect x="5" y="4.5" width="14" height="11" rx="4.5" stroke="currentColor" stroke-width="1.8"/>
+        <path d="M9 20.5h6M12 15.5v5M9 9.5h6M10 12.5h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+      </svg>
+    </span>
+  `;
+}
+
+function renderChatMessageMarkup(message) {
+  const isUser = message.role === "user";
+
+  return `
+    <article class="chat-message chat-message--${isUser ? "user" : "assistant"}">
+      ${!isUser ? getChatAssistantAvatarMarkup() : ""}
+      <div class="chat-bubble chat-bubble--${isUser ? "user" : "assistant"}">
+        <p>${escapeHtml(message.content)}</p>
+      </div>
+    </article>
+  `;
 }
 
 async function sendChatMessage(content) {
   const text = String(content || "").trim();
-  if (!text || state.chatBusy) {
+  const activeSession = getActiveChatSession();
+
+  if (!text || state.chatBusy || !activeSession) {
     return;
   }
 
-  ensureChatMessages();
-  state.chatMessages = [...state.chatMessages, createChatMessage("user", text)];
+  const optimisticMessage = {
+    id: `pending-${Date.now()}`,
+    session_id: activeSession.id,
+    role: "user",
+    content: text,
+    created_at: new Date().toISOString(),
+  };
+  updateChatSessionInState({
+    ...activeSession,
+    messages: [...(activeSession.messages || []), optimisticMessage],
+  });
   state.chatBusy = true;
   renderDiaryScreen();
 
   try {
-    const assistantMessage = await requestChatReply();
-    state.chatMessages = [
-      ...state.chatMessages,
-      createChatMessage("assistant", assistantMessage?.content || ""),
-    ];
+    const payload = await apiRequest("/api/chat", {
+      method: "POST",
+      body: JSON.stringify({ content: text }),
+    });
+    updateChatSessionInState(payload.session, payload.activeSessionId);
     setAppStatus("Ответ готов.", "success");
   } catch (error) {
-    state.chatMessages = [
-      ...state.chatMessages,
-      createChatMessage(
-        "assistant",
-        "Сейчас не получилось получить ответ модели. Попробуй повторить сообщение ещё раз через пару секунд.",
-      ),
-    ];
+    try {
+      await loadChatData();
+    } catch (loadError) {
+      console.warn(loadError);
+    }
     setAppStatus(error.message || "Не удалось получить ответ модели.", "error");
   } finally {
     state.chatBusy = false;
@@ -1098,20 +1158,11 @@ function scrollChatToBottom() {
   thread.scrollTop = thread.scrollHeight;
 }
 
-function getChatAssistantAvatar() {
-  return `
-    <span class="chat-assistant-avatar" aria-hidden="true">
-      <svg viewBox="0 0 24 24" fill="none">
-        <rect x="5" y="4.5" width="14" height="11" rx="4.5" stroke="currentColor" stroke-width="1.8"/>
-        <path d="M9 20.5h6M12 15.5v5M9 9.5h6M10 12.5h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
-      </svg>
-    </span>
-  `;
-}
-
 function renderDiaryScreen() {
-  ensureChatMessages();
-  const [firstMessage, ...otherMessages] = state.chatMessages;
+  const sessions = getChatSessions();
+  const activeSession = getActiveChatSession();
+  const activeMessages = Array.isArray(activeSession?.messages) ? activeSession.messages : [];
+  const [firstMessage, ...activeThreadMessages] = activeMessages;
   const introParagraphs = String(firstMessage?.content || "")
     .split(/\n+/)
     .map((line) => line.trim())
@@ -1119,23 +1170,30 @@ function renderDiaryScreen() {
   const introMarkup = introParagraphs.length
     ? introParagraphs.map((line) => `<p>${escapeHtml(line)}</p>`).join("")
     : "<p>Привет. Я рядом, чтобы поддержать тебя.</p>";
+  const showQuickActions = isSessionStart(activeSession);
 
-  const messagesMarkup = otherMessages
-    .map((message) => {
-      const isUser = message.role === "user";
+  const messagesMarkup = sessions
+    .map((session, sessionIndex) => {
+      const sessionMessages = Array.isArray(session.messages) ? session.messages : [];
+      const isActiveSession = session.id === activeSession?.id;
+      const messagesToRender = isActiveSession ? sessionMessages.slice(1) : sessionMessages;
+      const shouldRenderSeparator =
+        !isActiveSession || sessions.length > 1 || messagesToRender.length > 0;
 
-      return `
-        <article class="chat-message chat-message--${isUser ? "user" : "assistant"}">
-          ${!isUser ? getChatAssistantAvatar() : ""}
-          <div class="chat-bubble chat-bubble--${isUser ? "user" : "assistant"}">
-            <p>${escapeHtml(message.content)}</p>
-          </div>
-        </article>
+      const separatorMarkup = `
+        <div class="chat-session-separator">
+          <span>${escapeHtml(formatChatSessionLabel(session, sessionIndex))}</span>
+        </div>
       `;
+
+      const bodyMarkup = messagesToRender.map(renderChatMessageMarkup).join("");
+
+      return `${shouldRenderSeparator ? separatorMarkup : ""}${bodyMarkup}`;
     })
     .join("");
 
-  const actionsMarkup = CHAT_QUICK_ACTIONS.map(
+  const actionsMarkup = showQuickActions
+    ? CHAT_QUICK_ACTIONS.map(
     (action) => `
       <button
         class="chat-quick-action${action.wide ? " chat-quick-action--wide" : ""}"
@@ -1145,7 +1203,8 @@ function renderDiaryScreen() {
         ${escapeHtml(action.label)}
       </button>
     `,
-  ).join("");
+    ).join("")
+    : "";
 
   appContent.innerHTML = `
     <section class="chat-screen">
@@ -1155,7 +1214,7 @@ function renderDiaryScreen() {
 
       <section class="chat-surface">
         <article class="chat-intro">
-          ${getChatAssistantAvatar()}
+          ${getChatAssistantAvatarMarkup()}
           <div class="chat-intro__content">
             ${introMarkup}
           </div>
@@ -1167,7 +1226,7 @@ function renderDiaryScreen() {
             state.chatBusy
               ? `
             <article class="chat-message chat-message--assistant">
-              ${getChatAssistantAvatar()}
+              ${getChatAssistantAvatarMarkup()}
               <div class="chat-bubble chat-bubble--assistant chat-bubble--typing">
                 <span></span><span></span><span></span>
               </div>
@@ -1178,9 +1237,15 @@ function renderDiaryScreen() {
         </div>
 
         <div class="chat-footer">
-          <div class="chat-quick-actions">
-            ${actionsMarkup}
-          </div>
+          ${
+            showQuickActions
+              ? `
+            <div class="chat-quick-actions">
+              ${actionsMarkup}
+            </div>
+          `
+              : ""
+          }
 
           <form class="chat-composer" id="chatComposer">
             <textarea
@@ -1449,6 +1514,38 @@ function renderTabScreen(tabName) {
   };
 
   if (tabName === "diary") {
+    if (state.chatState === "loading") {
+      renderLoadingState("Загружаем историю чата и предыдущие сессии.");
+      return;
+    }
+
+    if (!state.chatData) {
+      state.chatState = "loading";
+      renderLoadingState("Загружаем историю чата и предыдущие сессии.");
+      loadChatData()
+        .then(() => {
+          if (state.currentTab === "diary" && !state.isAdminMode) {
+            renderTabScreen("diary");
+          }
+        })
+        .catch((error) => {
+          state.chatState = "error";
+          setAppStatus(
+            error.message || "Не удалось загрузить историю чата.",
+            "error",
+          );
+          if (state.currentTab === "diary" && !state.isAdminMode) {
+            renderErrorState("Не удалось загрузить историю чата.");
+          }
+        });
+      return;
+    }
+
+    if (state.chatState === "error") {
+      renderErrorState("Не удалось загрузить историю чата.");
+      return;
+    }
+
     renderDiaryScreen();
     return;
   }
@@ -1973,7 +2070,8 @@ async function logout() {
   state.diaryData = null;
   state.diaryFilter = "all";
   state.diaryEditingId = null;
-  state.chatMessages = [];
+  state.chatData = null;
+  state.chatState = "idle";
   state.chatBusy = false;
   state.isAdminMode = false;
   state.adminSection = "dashboard";
