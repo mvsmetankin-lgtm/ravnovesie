@@ -769,6 +769,28 @@ function extractCompletionText(payload) {
   return "";
 }
 
+function resetGigaChatTokenCache() {
+  gigachatTokenCache.accessToken = "";
+  gigachatTokenCache.expiresAt = 0;
+}
+
+function normalizeGigaChatExpiresAt(rawExpiresAt, now = Date.now()) {
+  const parsed = Number(rawExpiresAt || 0);
+  if (!parsed) {
+    return now + 25 * 60_000;
+  }
+
+  return parsed > 1_000_000_000_000 ? parsed : parsed * 1000;
+}
+
+function isGigaChatTokenExpiredResponse(response, payload) {
+  const message = String(
+    payload?.message || payload?.error?.message || payload?.error_description || payload?.error || "",
+  ).toLowerCase();
+
+  return response.status === 401 || message.includes("token has expired") || message.includes("expired");
+}
+
 async function getGigaChatAccessToken() {
   const now = Date.now();
   if (
@@ -810,14 +832,14 @@ async function getGigaChatAccessToken() {
   }
 
   const accessToken = String(payload?.access_token || "");
-  const expiresAtSeconds = Number(payload?.expires_at || 0);
+  const expiresAt = normalizeGigaChatExpiresAt(payload?.expires_at, now);
 
   if (!accessToken) {
     throw new Error("GigaChat не вернул access token.");
   }
 
   gigachatTokenCache.accessToken = accessToken;
-  gigachatTokenCache.expiresAt = expiresAtSeconds ? expiresAtSeconds * 1000 : now + 25 * 60_000;
+  gigachatTokenCache.expiresAt = expiresAt;
 
   return accessToken;
 }
@@ -865,42 +887,50 @@ async function sendChatViaOpenRouter(messages, systemPrompt = CHAT_SYSTEM_PROMPT
 }
 
 async function sendChatViaGigaChat(messages, systemPrompt = CHAT_SYSTEM_PROMPT) {
-  const accessToken = await getGigaChatAccessToken();
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const accessToken = await getGigaChatAccessToken();
+    const response = await fetch(GIGACHAT_CHAT_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({
+        model: GIGACHAT_MODEL,
+        messages: [
+          {
+            role: "system",
+            content: systemPrompt,
+          },
+          ...messages,
+        ],
+      }),
+    });
 
-  const response = await fetch(GIGACHAT_CHAT_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Accept: "application/json",
-      Authorization: `Bearer ${accessToken}`,
-    },
-    body: JSON.stringify({
-      model: GIGACHAT_MODEL,
-      messages: [
-        {
-          role: "system",
-          content: systemPrompt,
-        },
-        ...messages,
-      ],
-    }),
-  });
+    const payload = await response.json().catch(() => ({}));
 
-  const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      if (isGigaChatTokenExpiredResponse(response, payload) && attempt === 0) {
+        resetGigaChatTokenCache();
+        continue;
+      }
 
-  if (!response.ok) {
-    throw new Error(
-      payload?.message || payload?.error?.message || payload?.error || "GigaChat не смог обработать запрос.",
-    );
+      throw new Error(
+        payload?.message || payload?.error?.message || payload?.error || "GigaChat не смог обработать запрос.",
+      );
+    }
+
+    const content = extractCompletionText(payload);
+
+    if (!content) {
+      throw new Error("GigaChat не вернул текст ответа.");
+    }
+
+    return content;
   }
 
-  const content = extractCompletionText(payload);
-
-  if (!content) {
-    throw new Error("GigaChat не вернул текст ответа.");
-  }
-
-  return content;
+  throw new Error("Не удалось обновить токен GigaChat.");
 }
 
 async function sendChatCompletion(messages, systemPrompt = CHAT_SYSTEM_PROMPT) {
