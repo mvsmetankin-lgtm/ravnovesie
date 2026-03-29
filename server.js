@@ -48,6 +48,9 @@ const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 7;
 const HOME_DEFAULT_GOAL = 110;
 const CHAT_SESSION_TIMEOUT_MS = 60 * 60 * 1000;
+const CHAT_FLOW_IDLE = "idle";
+const CHAT_FLOW_AWAITING_MOOD = "awaiting_mood";
+const CHAT_FLOW_AWAITING_NOTES = "awaiting_notes";
 const OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions";
 const GIGACHAT_AUTH_URL = "https://ngw.devices.sberbank.ru:9443/api/v2/oauth";
 const GIGACHAT_CHAT_URL = "https://gigachat.devices.sberbank.ru/api/v1/chat/completions";
@@ -56,6 +59,14 @@ const ADMIN_SECTIONS = {
   practices: "practices",
   banners: "audio_banners",
 };
+const JOURNAL_TRIGGER_TEXT = "сделать запись в дневнике эмоций";
+const CHAT_MOOD_OPTIONS = [
+  { key: "very_sad", emoji: "😢", label: "Очень грустно" },
+  { key: "sad", emoji: "🙁", label: "Скорее грустно" },
+  { key: "neutral", emoji: "😐", label: "Нейтрально" },
+  { key: "calm", emoji: "🙂", label: "Спокойно" },
+  { key: "happy", emoji: "😄", label: "Очень хорошо" },
+];
 
 function loadSystemPrompt() {
   const promptPath = path.resolve(__dirname, CHAT_SYSTEM_PROMPT_FILE);
@@ -484,6 +495,18 @@ function normalizeChatMessages(rawMessages) {
     .slice(-12);
 }
 
+function normalizeUserText(text) {
+  return String(text || "").trim().toLowerCase();
+}
+
+function isJournalTriggerText(text) {
+  return normalizeUserText(text) === JOURNAL_TRIGGER_TEXT;
+}
+
+function getMoodOption(moodKey) {
+  return CHAT_MOOD_OPTIONS.find((option) => option.key === moodKey) || null;
+}
+
 function buildChatIntroMessage(profile) {
   const firstName = profile?.first_name || "друг";
   return [
@@ -515,7 +538,7 @@ async function getLatestActiveChatSession(userId) {
   const cutoffIso = getChatSessionCutoffIso();
   const { data, error } = await supabaseAdmin
     .from("chat_sessions")
-    .select("id, user_id, started_at, last_message_at, ended_at")
+    .select("id, user_id, started_at, last_message_at, ended_at, flow_state, journal_mood, journal_entry_id")
     .eq("user_id", userId)
     .is("ended_at", null)
     .gte("last_message_at", cutoffIso)
@@ -538,8 +561,9 @@ async function createChatSession(userId, profile) {
       user_id: userId,
       started_at: nowIso,
       last_message_at: nowIso,
+      flow_state: CHAT_FLOW_IDLE,
     })
-    .select("id, user_id, started_at, last_message_at, ended_at")
+    .select("id, user_id, started_at, last_message_at, ended_at, flow_state, journal_mood, journal_entry_id")
     .single();
 
   if (sessionError) {
@@ -591,7 +615,7 @@ async function getChatHistory(userId, profile) {
 
   const { data: sessions, error: sessionsError } = await supabaseAdmin
     .from("chat_sessions")
-    .select("id, user_id, started_at, last_message_at, ended_at")
+    .select("id, user_id, started_at, last_message_at, ended_at, flow_state, journal_mood, journal_entry_id")
     .eq("user_id", userId)
     .order("started_at", { ascending: true });
 
@@ -632,6 +656,90 @@ async function getChatHistory(userId, profile) {
       messages: messagesBySession[session.id] || [],
     })),
   };
+}
+
+async function insertChatMessage(sessionId, userId, role, content, createdAt = new Date().toISOString()) {
+  const { data, error } = await supabaseAdmin
+    .from("chat_messages")
+    .insert({
+      session_id: sessionId,
+      user_id: userId,
+      role,
+      content,
+      created_at: createdAt,
+    })
+    .select("id, session_id, user_id, role, content, created_at")
+    .single();
+
+  if (error) {
+    throw error;
+  }
+
+  return data;
+}
+
+async function updateChatSession(sessionId, fields) {
+  const { data, error } = await supabaseAdmin
+    .from("chat_sessions")
+    .update(fields)
+    .eq("id", sessionId)
+    .select("id, user_id, started_at, last_message_at, ended_at, flow_state, journal_mood, journal_entry_id")
+    .single();
+
+  if (error) {
+    throw error;
+  }
+
+  return data;
+}
+
+async function createJournalEntryFromMood(userId, moodOption) {
+  const { data, error } = await supabaseAdmin
+    .from("journal_entries")
+    .insert({
+      user_id: userId,
+      content: "",
+      word_count: 0,
+      emotion_tags: [moodOption.label],
+    })
+    .select("id, user_id, content, word_count, emotion_tags, created_at, updated_at")
+    .single();
+
+  if (error) {
+    throw error;
+  }
+
+  return data;
+}
+
+async function updateJournalEntryNotes(entryId, notes) {
+  const { data, error } = await supabaseAdmin
+    .from("journal_entries")
+    .update({
+      content: notes,
+      word_count: countWords(notes),
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", entryId)
+    .select("id, user_id, content, word_count, emotion_tags, created_at, updated_at")
+    .single();
+
+  if (error) {
+    throw error;
+  }
+
+  return data;
+}
+
+function buildJournalAnalysisPrompt({ moodOption, notes }) {
+  return [
+    "Пользователь сделал запись в дневнике эмоций.",
+    `Выбранная эмоция: ${moodOption.emoji} ${moodOption.label}.`,
+    `Заметка пользователя: ${notes}`,
+    "Если в заметке ощущается подавленность, безнадежность, упадок сил или признаки депрессивного состояния, мягко предложи 1-2 техники самопомощи на сейчас.",
+    "Если у пользователя хорошее настроение и его ничего особенно не беспокоит, тепло отметь это и предложи одну короткую практику для поддержания ресурса.",
+    "Ответь на русском в 2-5 предложениях, эмпатично, без диагнозов и без длинных списков.",
+  ].join("\n");
 }
 
 function extractCompletionText(payload) {
@@ -714,7 +822,7 @@ async function getGigaChatAccessToken() {
   return accessToken;
 }
 
-async function sendChatViaOpenRouter(messages) {
+async function sendChatViaOpenRouter(messages, systemPrompt = CHAT_SYSTEM_PROMPT) {
   if (!OPENROUTER_API_KEY) {
     throw new Error(
       "OpenRouter не настроен на сервере. Добавь OPENROUTER_API_KEY в .env и перезапусти backend.",
@@ -732,7 +840,7 @@ async function sendChatViaOpenRouter(messages) {
       messages: [
         {
           role: "system",
-          content: CHAT_SYSTEM_PROMPT,
+          content: systemPrompt,
         },
         ...messages,
       ],
@@ -756,7 +864,7 @@ async function sendChatViaOpenRouter(messages) {
   return content;
 }
 
-async function sendChatViaGigaChat(messages) {
+async function sendChatViaGigaChat(messages, systemPrompt = CHAT_SYSTEM_PROMPT) {
   const accessToken = await getGigaChatAccessToken();
 
   const response = await fetch(GIGACHAT_CHAT_URL, {
@@ -771,7 +879,7 @@ async function sendChatViaGigaChat(messages) {
       messages: [
         {
           role: "system",
-          content: CHAT_SYSTEM_PROMPT,
+          content: systemPrompt,
         },
         ...messages,
       ],
@@ -793,6 +901,18 @@ async function sendChatViaGigaChat(messages) {
   }
 
   return content;
+}
+
+async function sendChatCompletion(messages, systemPrompt = CHAT_SYSTEM_PROMPT) {
+  if (LLM_PROVIDER === "gigachat") {
+    return sendChatViaGigaChat(messages, systemPrompt);
+  }
+
+  if (LLM_PROVIDER === "openrouter") {
+    return sendChatViaOpenRouter(messages, systemPrompt);
+  }
+
+  throw new Error("Неизвестный LLM_PROVIDER. Используй openrouter или gigachat в .env.");
 }
 
 async function requireAuth(req, res, next) {
@@ -1009,90 +1129,195 @@ app.get("/api/chat", requireAuth, async (req, res) => {
 app.post("/api/chat", requireAuth, async (req, res) => {
   try {
     const content = String(req.body?.content || "").trim();
+    const action = String(req.body?.action || "").trim();
+    const mood = String(req.body?.mood || "").trim();
     if (!content) {
-      throw new Error("Сообщение пользователя не найдено.");
+      if (!(action === "select_mood" && mood)) {
+        throw new Error("Сообщение пользователя не найдено.");
+      }
     }
 
     const profile = await getProfile(req.auth.sub);
     const activeSession = await ensureActiveChatSession(req.auth.sub, profile);
     const savedMessages = await getChatMessagesForSession(activeSession.id);
 
-    const userInsertTime = new Date().toISOString();
-    const { data: userMessage, error: userInsertError } = await supabaseAdmin
-      .from("chat_messages")
-      .insert({
-        session_id: activeSession.id,
-        user_id: req.auth.sub,
-        role: "user",
-        content,
-        created_at: userInsertTime,
-      })
-      .select("id, session_id, user_id, role, content, created_at")
-      .single();
+    if (action === "select_mood") {
+      if (activeSession.flow_state !== CHAT_FLOW_AWAITING_MOOD) {
+        throw new Error("Сначала нужно запустить сценарий записи в дневнике эмоций.");
+      }
 
-    if (userInsertError) {
-      throw userInsertError;
-    }
+      const moodOption = getMoodOption(mood);
+      if (!moodOption) {
+        throw new Error("Не удалось определить выбранную эмоцию.");
+      }
 
-    const { error: userSessionUpdateError } = await supabaseAdmin
-      .from("chat_sessions")
-      .update({
-        last_message_at: userInsertTime,
-        ended_at: null,
-      })
-      .eq("id", activeSession.id);
-
-    if (userSessionUpdateError) {
-      throw userSessionUpdateError;
-    }
-
-    const llmMessages = normalizeChatMessages([
-      ...savedMessages,
-      userMessage,
-    ]);
-
-    let assistantContent = "";
-
-    if (LLM_PROVIDER === "gigachat") {
-      assistantContent = await sendChatViaGigaChat(llmMessages);
-    } else if (LLM_PROVIDER === "openrouter") {
-      assistantContent = await sendChatViaOpenRouter(llmMessages);
-    } else {
-      throw new Error(
-        "Неизвестный LLM_PROVIDER. Используй openrouter или gigachat в .env.",
+      const userInsertTime = new Date().toISOString();
+      const userMessage = await insertChatMessage(
+        activeSession.id,
+        req.auth.sub,
+        "user",
+        `${moodOption.emoji} ${moodOption.label}`,
+        userInsertTime,
       );
-    }
 
-    const assistantInsertTime = new Date().toISOString();
-    const { data: assistantMessage, error: assistantInsertError } = await supabaseAdmin
-      .from("chat_messages")
-      .insert({
-        session_id: activeSession.id,
-        user_id: req.auth.sub,
-        role: "assistant",
-        content: assistantContent,
-        created_at: assistantInsertTime,
-      })
-      .select("id, session_id, user_id, role, content, created_at")
-      .single();
+      const entry = await createJournalEntryFromMood(req.auth.sub, moodOption);
+      const assistantInsertTime = new Date().toISOString();
+      const assistantMessage = await insertChatMessage(
+        activeSession.id,
+        req.auth.sub,
+        "assistant",
+        "Поделитесь вашими заметками.",
+        assistantInsertTime,
+      );
 
-    if (assistantInsertError) {
-      throw assistantInsertError;
-    }
-
-    const { data: updatedSession, error: sessionUpdateError } = await supabaseAdmin
-      .from("chat_sessions")
-      .update({
+      const updatedSession = await updateChatSession(activeSession.id, {
         last_message_at: assistantInsertTime,
         ended_at: null,
-      })
-      .eq("id", activeSession.id)
-      .select("id, user_id, started_at, last_message_at, ended_at")
-      .single();
+        flow_state: CHAT_FLOW_AWAITING_NOTES,
+        journal_mood: moodOption.key,
+        journal_entry_id: entry.id,
+      });
 
-    if (sessionUpdateError) {
-      throw sessionUpdateError;
+      res.json({
+        activeSessionId: updatedSession.id,
+        session: {
+          ...updatedSession,
+          messages: [...savedMessages, userMessage, assistantMessage],
+        },
+      });
+      return;
     }
+
+    const userInsertTime = new Date().toISOString();
+    const userMessage = await insertChatMessage(
+      activeSession.id,
+      req.auth.sub,
+      "user",
+      content,
+      userInsertTime,
+    );
+
+    await updateChatSession(activeSession.id, {
+      last_message_at: userInsertTime,
+      ended_at: null,
+    });
+
+    if (activeSession.flow_state === CHAT_FLOW_AWAITING_NOTES && activeSession.journal_entry_id) {
+      const moodOption = getMoodOption(activeSession.journal_mood) || CHAT_MOOD_OPTIONS[2];
+      await updateJournalEntryNotes(activeSession.journal_entry_id, content);
+
+      const assistantContent = await sendChatCompletion(
+        [
+          {
+            role: "user",
+            content: buildJournalAnalysisPrompt({
+              moodOption,
+              notes: content,
+            }),
+          },
+        ],
+        `${CHAT_SYSTEM_PROMPT}\n\nСейчас ты работаешь как мягкий помощник по дневнику эмоций.`,
+      );
+
+      const assistantInsertTime = new Date().toISOString();
+      const assistantMessage = await insertChatMessage(
+        activeSession.id,
+        req.auth.sub,
+        "assistant",
+        assistantContent,
+        assistantInsertTime,
+      );
+
+      const updatedSession = await updateChatSession(activeSession.id, {
+        last_message_at: assistantInsertTime,
+        ended_at: null,
+        flow_state: CHAT_FLOW_IDLE,
+        journal_mood: null,
+        journal_entry_id: null,
+      });
+
+      res.json({
+        activeSessionId: updatedSession.id,
+        session: {
+          ...updatedSession,
+          messages: [...savedMessages, userMessage, assistantMessage],
+        },
+      });
+      return;
+    }
+
+    if (activeSession.flow_state === CHAT_FLOW_AWAITING_MOOD && content) {
+      const assistantInsertTime = new Date().toISOString();
+      const assistantMessage = await insertChatMessage(
+        activeSession.id,
+        req.auth.sub,
+        "assistant",
+        "Чтобы начать запись, выберите, пожалуйста, одну эмоцию ниже.",
+        assistantInsertTime,
+      );
+
+      const updatedSession = await updateChatSession(activeSession.id, {
+        last_message_at: assistantInsertTime,
+        ended_at: null,
+        flow_state: CHAT_FLOW_AWAITING_MOOD,
+      });
+
+      res.json({
+        activeSessionId: updatedSession.id,
+        session: {
+          ...updatedSession,
+          messages: [...savedMessages, userMessage, assistantMessage],
+        },
+      });
+      return;
+    }
+
+    if (isJournalTriggerText(content)) {
+      const assistantInsertTime = new Date().toISOString();
+      const assistantMessage = await insertChatMessage(
+        activeSession.id,
+        req.auth.sub,
+        "assistant",
+        "Как вы чувствуете сегодня?",
+        assistantInsertTime,
+      );
+
+      const updatedSession = await updateChatSession(activeSession.id, {
+        last_message_at: assistantInsertTime,
+        ended_at: null,
+        flow_state: CHAT_FLOW_AWAITING_MOOD,
+        journal_mood: null,
+        journal_entry_id: null,
+      });
+
+      res.json({
+        activeSessionId: updatedSession.id,
+        session: {
+          ...updatedSession,
+          messages: [...savedMessages, userMessage, assistantMessage],
+        },
+      });
+      return;
+    }
+
+    const llmMessages = normalizeChatMessages([...savedMessages, userMessage]);
+    const assistantContent = await sendChatCompletion(llmMessages);
+    const assistantInsertTime = new Date().toISOString();
+    const assistantMessage = await insertChatMessage(
+      activeSession.id,
+      req.auth.sub,
+      "assistant",
+      assistantContent,
+      assistantInsertTime,
+    );
+
+    const updatedSession = await updateChatSession(activeSession.id, {
+      last_message_at: assistantInsertTime,
+      ended_at: null,
+      flow_state: CHAT_FLOW_IDLE,
+      journal_mood: null,
+      journal_entry_id: null,
+    });
 
     res.json({
       activeSessionId: updatedSession.id,

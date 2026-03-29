@@ -1018,9 +1018,16 @@ const CHAT_QUICK_ACTIONS = [
   },
   {
     label: "Сделай запись в дневнике эмоций",
-    prompt:
-      "Помоги мне оформить короткую запись в дневнике эмоций: что я чувствую, что это вызвало и что мне сейчас нужно.",
+    prompt: "Сделать запись в дневнике эмоций",
   },
+];
+
+const CHAT_MOOD_OPTIONS = [
+  { key: "very_sad", emoji: "😢", label: "Очень грустно" },
+  { key: "sad", emoji: "🙁", label: "Скорее грустно" },
+  { key: "neutral", emoji: "😐", label: "Нейтрально" },
+  { key: "calm", emoji: "🙂", label: "Спокойно" },
+  { key: "happy", emoji: "😄", label: "Очень хорошо" },
 ];
 
 function getChatSessions() {
@@ -1038,6 +1045,14 @@ function getActiveChatSession() {
 
 function isSessionStart(session) {
   return !session?.messages?.some((message) => message.role === "user");
+}
+
+function isAwaitingChatMood(session) {
+  return session?.flow_state === "awaiting_mood";
+}
+
+function isAwaitingChatNotes(session) {
+  return session?.flow_state === "awaiting_notes";
 }
 
 function formatChatSessionLabel(session, index) {
@@ -1149,6 +1164,44 @@ async function sendChatMessage(content) {
   }
 }
 
+async function sendChatMood(moodKey) {
+  const activeSession = getActiveChatSession();
+
+  if (!activeSession || state.chatBusy) {
+    return;
+  }
+
+  const moodOption = CHAT_MOOD_OPTIONS.find((option) => option.key === moodKey);
+  if (!moodOption) {
+    return;
+  }
+
+  state.chatBusy = true;
+  renderDiaryScreen();
+
+  try {
+    const payload = await apiRequest("/api/chat", {
+      method: "POST",
+      body: JSON.stringify({
+        action: "select_mood",
+        mood: moodKey,
+      }),
+    });
+    updateChatSessionInState(payload.session, payload.activeSessionId);
+    setAppStatus("Эмоция сохранена.", "success");
+  } catch (error) {
+    try {
+      await loadChatData();
+    } catch (loadError) {
+      console.warn(loadError);
+    }
+    setAppStatus(error.message || "Не удалось сохранить выбранную эмоцию.", "error");
+  } finally {
+    state.chatBusy = false;
+    renderDiaryScreen();
+  }
+}
+
 function scrollChatToBottom() {
   const thread = document.getElementById("chatThread");
   if (!thread) {
@@ -1171,6 +1224,13 @@ function renderDiaryScreen() {
     ? introParagraphs.map((line) => `<p>${escapeHtml(line)}</p>`).join("")
     : "<p>Привет. Я рядом, чтобы поддержать тебя.</p>";
   const showQuickActions = isSessionStart(activeSession);
+  const showMoodPicker = isAwaitingChatMood(activeSession);
+  const composerDisabled = state.chatBusy || showMoodPicker;
+  const composerPlaceholder = showMoodPicker
+    ? "Сначала выберите эмоцию ниже"
+    : isAwaitingChatNotes(activeSession)
+      ? "Поделитесь вашими заметками"
+      : "Ваш комментарий";
 
   const messagesMarkup = sessions
     .map((session, sessionIndex) => {
@@ -1205,6 +1265,22 @@ function renderDiaryScreen() {
     `,
     ).join("")
     : "";
+  const moodPickerMarkup = showMoodPicker
+    ? CHAT_MOOD_OPTIONS.map(
+        (option) => `
+          <button
+            class="chat-mood-button"
+            type="button"
+            data-chat-mood="${escapeHtml(option.key)}"
+            aria-label="${escapeHtml(option.label)}"
+            title="${escapeHtml(option.label)}"
+            ${state.chatBusy ? "disabled" : ""}
+          >
+            <span>${escapeHtml(option.emoji)}</span>
+          </button>
+        `,
+      ).join("")
+    : "";
 
   appContent.innerHTML = `
     <section class="chat-screen">
@@ -1238,6 +1314,15 @@ function renderDiaryScreen() {
 
         <div class="chat-footer">
           ${
+            showMoodPicker
+              ? `
+            <div class="chat-mood-picker" role="group" aria-label="Выбор эмоции">
+              ${moodPickerMarkup}
+            </div>
+          `
+              : ""
+          }
+          ${
             showQuickActions
               ? `
             <div class="chat-quick-actions">
@@ -1252,11 +1337,11 @@ function renderDiaryScreen() {
               id="chatInput"
               name="message"
               rows="2"
-              placeholder="Ваш комментарий"
-              ${state.chatBusy ? "disabled" : ""}
+              placeholder="${escapeHtml(composerPlaceholder)}"
+              ${composerDisabled ? "disabled" : ""}
               required
             ></textarea>
-            <button class="chat-send-button" type="submit" ${state.chatBusy ? "disabled" : ""} aria-label="Отправить">
+            <button class="chat-send-button" type="submit" ${composerDisabled ? "disabled" : ""} aria-label="Отправить">
               <svg viewBox="0 0 24 24" fill="none">
                 <path d="M4 19 20 12 4 5l2.5 6.2L15 12l-8.5.8L4 19Z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
               </svg>
@@ -1286,6 +1371,12 @@ function renderDiaryScreen() {
   appContent.querySelectorAll("[data-chat-prompt]").forEach((button) => {
     button.addEventListener("click", async () => {
       await sendChatMessage(button.dataset.chatPrompt || "");
+    });
+  });
+
+  appContent.querySelectorAll("[data-chat-mood]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      await sendChatMood(button.dataset.chatMood || "");
     });
   });
 
