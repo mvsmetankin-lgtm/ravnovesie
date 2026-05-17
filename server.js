@@ -1408,6 +1408,19 @@ app.get("/api/admin/users", requireAuth, requireSuperAdmin, async (_req, res) =>
   }
 });
 
+app.get("/api/admin/all-users", requireAuth, requireAdmin, async (_req, res) => {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from("user")
+      .select("id, email, first_name, second_name, created_at, telegram_id, telegram_username, avatar_url, auth_provider, is_admin, is_super_admin")
+      .order("created_at", { ascending: false });
+    if (error) { res.status(500).json({ error: error.message }); return; }
+    res.json({ users: data || [] });
+  } catch (error) {
+    res.status(500).json({ error: error.message || "Не удалось загрузить пользователей." });
+  }
+});
+
 app.post("/api/admin/users", requireAuth, requireSuperAdmin, async (req, res) => {
   try {
     const email = String(req.body?.email || "").trim().toLowerCase();

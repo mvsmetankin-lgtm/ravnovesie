@@ -57,6 +57,7 @@ const state = {
     practices: [],
     banners: [],
     users: [],
+    allUsers: [],
   },
   adminSelections: {
     categories: null,
@@ -774,7 +775,434 @@ function renderAdminSection(sectionName) {
   `;
 }
 
+function renderAdminDashboard() {
+  const totalUsers = state.adminData.allUsers.length;
+  const totalMessages = "—";
+  const activeSubscriptions = "—";
+  const revenue = "—";
+
+  appContent.innerHTML = `
+    <section class="admin-screen">
+      <header class="admin-screen__header">
+        <div>
+          <p class="admin-screen__eyebrow">Обзор системы</p>
+          <h1>Дашборд</h1>
+          <p>Ключевые метрики приложения в реальном времени.</p>
+        </div>
+        <div class="admin-screen__actions">
+          <button class="secondary-button" type="button" id="adminExportButton">Экспорт в CSV</button>
+        </div>
+      </header>
+
+      <div class="admin-metrics">
+        <article class="admin-metric-card">
+          <div class="admin-metric-card__value">${escapeHtml(String(totalUsers))}</div>
+          <div class="admin-metric-card__label">Пользователи</div>
+          <div class="admin-metric-card__desc">Всего зарегистрировано</div>
+        </article>
+        <article class="admin-metric-card">
+          <div class="admin-metric-card__value">${escapeHtml(String(totalMessages))}</div>
+          <div class="admin-metric-card__label">Сообщения в чате</div>
+          <div class="admin-metric-card__desc">Всего сообщений</div>
+        </article>
+        <article class="admin-metric-card">
+          <div class="admin-metric-card__value">${escapeHtml(String(activeSubscriptions))}</div>
+          <div class="admin-metric-card__label">Активные подписки</div>
+          <div class="admin-metric-card__desc">Текущий период</div>
+        </article>
+        <article class="admin-metric-card">
+          <div class="admin-metric-card__value">${escapeHtml(String(revenue))}</div>
+          <div class="admin-metric-card__label">Выручка</div>
+          <div class="admin-metric-card__desc">Подключите платёжный провайдер</div>
+        </article>
+      </div>
+    </section>
+  `;
+
+  document.getElementById("adminExportButton")?.addEventListener("click", () => {
+    window.location.href = "/api/admin/dashboard/export?format=csv";
+  });
+
+  updateNavigationVisibility();
+}
+
+function renderAdminUsers() {
+  const allUsers = state.adminData.allUsers || [];
+  const today = new Date().toISOString().slice(0, 10);
+  const newToday = allUsers.filter((u) => (u.created_at || "").slice(0, 10) === today).length;
+
+  let filterValue = "all";
+  let searchValue = "";
+
+  function getFilteredUsers() {
+    return allUsers.filter((u) => {
+      const matchSearch =
+        !searchValue ||
+        (u.first_name || "").toLowerCase().includes(searchValue) ||
+        (u.second_name || "").toLowerCase().includes(searchValue) ||
+        (u.email || "").toLowerCase().includes(searchValue) ||
+        (u.telegram_username || "").toLowerCase().includes(searchValue);
+      return matchSearch;
+    });
+  }
+
+  function renderUserList(users) {
+    if (!users.length) {
+      return `
+        <article class="admin-empty">
+          <h4>Пользователи не найдены</h4>
+          <p>Попробуйте изменить параметры поиска или фильтра.</p>
+        </article>
+      `;
+    }
+
+    return users.map((u) => {
+      const initials = ((u.first_name || u.email || "?")[0] || "?").toUpperCase();
+      const name = [u.first_name, u.second_name].filter(Boolean).join(" ") || "—";
+      const authBadge = u.auth_provider === "telegram"
+        ? `<span class="admin-status-badge admin-status-badge--telegram">Telegram</span>`
+        : `<span class="admin-status-badge admin-status-badge--email">Email</span>`;
+      const roleBadge = u.is_super_admin
+        ? `<span class="admin-status-badge admin-status-badge--active">Супер-адм</span>`
+        : u.is_admin
+        ? `<span class="admin-status-badge admin-status-badge--active">Админ</span>`
+        : `<span class="admin-status-badge admin-status-badge--inactive">Пользователь</span>`;
+
+      return `
+        <div class="admin-user-row">
+          <div class="admin-user-avatar">${escapeHtml(initials)}</div>
+          <div class="admin-user-info">
+            <div class="admin-user-info__name">${escapeHtml(name)}</div>
+            <div class="admin-user-info__meta">${escapeHtml(u.email || u.telegram_username || "—")}</div>
+          </div>
+          ${authBadge}
+          ${roleBadge}
+          ${isSuperAdminUser() ? `
+            <div class="admin-user-actions">
+              <button class="secondary-button" type="button" onclick="alert('Блокировка: ${escapeHtml(u.id)}')">Блок</button>
+              <button class="secondary-button" type="button" onclick="alert('Удаление: ${escapeHtml(u.id)}')">Удалить</button>
+            </div>
+          ` : ""}
+        </div>
+      `;
+    }).join("");
+  }
+
+  appContent.innerHTML = `
+    <section class="admin-screen">
+      <header class="admin-screen__header">
+        <div>
+          <p class="admin-screen__eyebrow">Управление аккаунтами</p>
+          <h1>Пользователи</h1>
+          <p>Всего: <strong>${escapeHtml(String(allUsers.length))}</strong> &nbsp;•&nbsp; Новых сегодня: <strong>${escapeHtml(String(newToday))}</strong></p>
+        </div>
+        <div class="admin-screen__actions">
+          <button class="secondary-button" type="button" id="adminUsersExport">Экспорт в CSV</button>
+        </div>
+      </header>
+
+      <div class="admin-toolbar">
+        <input class="admin-toolbar__search" type="search" id="userSearchInput" placeholder="Поиск по имени, email, telegram..." />
+        <select class="admin-toolbar__filter" id="userFilterSelect">
+          <option value="all">Все пользователи</option>
+          <option value="active">С активной подпиской</option>
+          <option value="inactive">Без подписки</option>
+        </select>
+      </div>
+
+      <div class="admin-user-list" id="userListContainer">
+        ${allUsers.length === 0
+          ? `<article class="admin-empty"><h4>Данные загружаются</h4><p>Список пользователей появится после подключения к backend.</p></article>`
+          : renderUserList(getFilteredUsers())
+        }
+      </div>
+    </section>
+  `;
+
+  const searchInput = document.getElementById("userSearchInput");
+  const filterSelect = document.getElementById("userFilterSelect");
+  const listContainer = document.getElementById("userListContainer");
+
+  function rerenderList() {
+    if (listContainer) {
+      listContainer.innerHTML = renderUserList(getFilteredUsers());
+    }
+  }
+
+  searchInput?.addEventListener("input", (e) => {
+    searchValue = e.target.value.trim().toLowerCase();
+    rerenderList();
+  });
+
+  filterSelect?.addEventListener("change", (e) => {
+    filterValue = e.target.value;
+    rerenderList();
+  });
+
+  document.getElementById("adminUsersExport")?.addEventListener("click", () => {
+    window.location.href = "/api/admin/dashboard/export?format=csv";
+  });
+
+  updateNavigationVisibility();
+}
+
+function renderAdminChatbot() {
+  appContent.innerHTML = `
+    <section class="admin-screen">
+      <header class="admin-screen__header">
+        <div>
+          <p class="admin-screen__eyebrow">Статистика LLM</p>
+          <h1>Чат-бот</h1>
+          <p>Метрики использования AI-ассистента.</p>
+        </div>
+      </header>
+
+      <div class="admin-metrics">
+        <article class="admin-metric-card">
+          <div class="admin-metric-card__value">—</div>
+          <div class="admin-metric-card__label">Всего сообщений</div>
+          <div class="admin-metric-card__desc">Из таблицы chat_messages</div>
+        </article>
+        <article class="admin-metric-card">
+          <div class="admin-metric-card__value">—</div>
+          <div class="admin-metric-card__label">Среднее на пользователя</div>
+          <div class="admin-metric-card__desc">Сообщений на активного юзера</div>
+        </article>
+        <article class="admin-metric-card">
+          <div class="admin-metric-card__value">—</div>
+          <div class="admin-metric-card__label">Использовано токенов</div>
+          <div class="admin-metric-card__desc">Зависит от LLM провайдера</div>
+        </article>
+      </div>
+
+      <article class="admin-panel">
+        <div class="admin-panel__header">
+          <div>
+            <h3>Последние ответы модели</h3>
+            <p>Данные появятся после подключения LLM и накопления истории чатов.</p>
+          </div>
+        </div>
+        <article class="admin-empty">
+          <h4>Данные недоступны</h4>
+          <p>Данные появятся после подключения LLM и накопления истории чатов.</p>
+        </article>
+      </article>
+    </section>
+  `;
+
+  updateNavigationVisibility();
+}
+
+function renderAdminContent() {
+  appContent.innerHTML = `
+    <section class="admin-screen">
+      <header class="admin-screen__header">
+        <div>
+          <p class="admin-screen__eyebrow">Контент и данные</p>
+          <h1>Управление контентом</h1>
+          <p>Управляй наполнением главной страницы из одного места.</p>
+        </div>
+        <div class="admin-screen__actions">
+          <button class="secondary-button" type="button" id="adminRefreshButton">Обновить данные</button>
+        </div>
+      </header>
+
+      <section class="admin-summary">
+        <article class="admin-summary__card">
+          <strong>${escapeHtml(String(state.adminData.categories.length))}</strong>
+          <span>категории</span>
+        </article>
+        <article class="admin-summary__card">
+          <strong>${escapeHtml(String(state.adminData.practices.length))}</strong>
+          <span>практики</span>
+        </article>
+        <article class="admin-summary__card">
+          <strong>${escapeHtml(String(state.adminData.banners.length))}</strong>
+          <span>баннеры</span>
+        </article>
+      </section>
+
+      <div class="admin-grid">
+        ${renderAdminSection("categories")}
+        ${renderAdminSection("practices")}
+        ${renderAdminSection("banners")}
+      </div>
+    </section>
+  `;
+
+  bindAdminScreenEvents();
+  updateNavigationVisibility();
+}
+
+function renderAdminSubscription() {
+  appContent.innerHTML = `
+    <section class="admin-screen">
+      <header class="admin-screen__header">
+        <div>
+          <p class="admin-screen__eyebrow">Монетизация</p>
+          <h1>Подписка</h1>
+          <p>Управление подписками пользователей и статистика платежей.</p>
+        </div>
+      </header>
+
+      <div class="admin-metrics">
+        <article class="admin-metric-card">
+          <div class="admin-metric-card__value">—</div>
+          <div class="admin-metric-card__label">Активных подписок</div>
+          <div class="admin-metric-card__desc">Текущий период</div>
+        </article>
+        <article class="admin-metric-card">
+          <div class="admin-metric-card__value">—</div>
+          <div class="admin-metric-card__label">Выручка за месяц</div>
+          <div class="admin-metric-card__desc">Требуется платёжный провайдер</div>
+        </article>
+        <article class="admin-metric-card">
+          <div class="admin-metric-card__value">—</div>
+          <div class="admin-metric-card__label">Отток</div>
+          <div class="admin-metric-card__desc">Отменённые подписки</div>
+        </article>
+      </div>
+
+      <article class="admin-panel">
+        <div class="admin-panel__header">
+          <div>
+            <h3>Список подписок</h3>
+            <p>Данные появятся после подключения платёжного провайдера.</p>
+          </div>
+        </div>
+        <article class="admin-empty">
+          <h4>Платёжный провайдер не подключён</h4>
+          <p>Данные появятся после подключения платёжного провайдера (например, ЮКасса или Stripe).</p>
+        </article>
+      </article>
+    </section>
+  `;
+
+  updateNavigationVisibility();
+}
+
+function renderAdminMonitoring() {
+  appContent.innerHTML = `
+    <section class="admin-screen">
+      <header class="admin-screen__header">
+        <div>
+          <p class="admin-screen__eyebrow">Здоровье системы</p>
+          <h1>Мониторинг</h1>
+          <p>Статус основных компонентов приложения.</p>
+        </div>
+        <div class="admin-screen__actions">
+          <button class="secondary-button" type="button" id="monitoringRefreshButton">Проверить статус</button>
+        </div>
+      </header>
+
+      <div class="admin-status-grid" id="monitoringStatusGrid">
+        <div class="admin-status-item">
+          <div class="admin-status-item__icon admin-status-item__icon--pending">⏳</div>
+          <div class="admin-status-item__body">
+            <div class="admin-status-item__name">Backend API</div>
+            <div class="admin-status-item__value">Проверяем...</div>
+          </div>
+        </div>
+        <div class="admin-status-item">
+          <div class="admin-status-item__icon admin-status-item__icon--pending">⏳</div>
+          <div class="admin-status-item__body">
+            <div class="admin-status-item__name">База данных</div>
+            <div class="admin-status-item__value">Проверяем...</div>
+          </div>
+        </div>
+        <div class="admin-status-item">
+          <div class="admin-status-item__icon admin-status-item__icon--pending">⏳</div>
+          <div class="admin-status-item__body">
+            <div class="admin-status-item__name">LLM Провайдер</div>
+            <div class="admin-status-item__value">Требует настройки</div>
+          </div>
+        </div>
+      </div>
+    </section>
+  `;
+
+  async function checkHealth() {
+    const grid = document.getElementById("monitoringStatusGrid");
+    if (!grid) return;
+
+    let apiOk = false;
+    try {
+      const payload = await apiRequest("/api/health");
+      apiOk = Boolean(payload?.ok);
+    } catch {
+      apiOk = false;
+    }
+
+    const apiIconClass = apiOk ? "admin-status-item__icon--ok" : "admin-status-item__icon--error";
+    const apiIcon = apiOk ? "✓" : "✗";
+    const apiValue = apiOk ? "OK" : "Ошибка";
+    const apiValueClass = apiOk ? "admin-status-item__value--ok" : "admin-status-item__value--error";
+    const dbIconClass = apiOk ? "admin-status-item__icon--ok" : "admin-status-item__icon--error";
+    const dbIcon = apiOk ? "✓" : "✗";
+    const dbValue = apiOk ? "OK" : "Ошибка";
+    const dbValueClass = apiOk ? "admin-status-item__value--ok" : "admin-status-item__value--error";
+
+    grid.innerHTML = `
+      <div class="admin-status-item">
+        <div class="admin-status-item__icon ${apiIconClass}">${apiIcon}</div>
+        <div class="admin-status-item__body">
+          <div class="admin-status-item__name">Backend API</div>
+          <div class="admin-status-item__value ${apiValueClass}">${apiValue}</div>
+        </div>
+      </div>
+      <div class="admin-status-item">
+        <div class="admin-status-item__icon ${dbIconClass}">${dbIcon}</div>
+        <div class="admin-status-item__body">
+          <div class="admin-status-item__name">База данных</div>
+          <div class="admin-status-item__value ${dbValueClass}">${dbValue}</div>
+        </div>
+      </div>
+      <div class="admin-status-item">
+        <div class="admin-status-item__icon admin-status-item__icon--pending">—</div>
+        <div class="admin-status-item__body">
+          <div class="admin-status-item__name">LLM Провайдер</div>
+          <div class="admin-status-item__value">Требует настройки</div>
+        </div>
+      </div>
+    `;
+  }
+
+  document.getElementById("monitoringRefreshButton")?.addEventListener("click", checkHealth);
+  checkHealth();
+  updateNavigationVisibility();
+}
+
 function renderAdminScreen() {
+  if (state.adminSection === "dashboard") {
+    renderAdminDashboard();
+    return;
+  }
+
+  if (state.adminSection === "users") {
+    renderAdminUsers();
+    return;
+  }
+
+  if (state.adminSection === "chatbot") {
+    renderAdminChatbot();
+    return;
+  }
+
+  if (state.adminSection === "content") {
+    renderAdminContent();
+    return;
+  }
+
+  if (state.adminSection === "subscription") {
+    renderAdminSubscription();
+    return;
+  }
+
+  if (state.adminSection === "monitoring") {
+    renderAdminMonitoring();
+    return;
+  }
+
   if (state.adminSection === "profile") {
     const editingAdmin =
       (state.adminData.users || []).find((user) => user.id === state.adminUserEditingId) || null;
@@ -947,44 +1375,9 @@ function renderAdminScreen() {
     return;
   }
 
-  appContent.innerHTML = `
-    <section class="admin-screen">
-      <header class="admin-screen__header">
-        <div>
-          <p class="admin-screen__eyebrow">Контент и данные</p>
-          <h1>Админка MindFlow</h1>
-          <p>Управляй наполнением главной страницы из одного места.</p>
-        </div>
-        <div class="admin-screen__actions">
-          <button class="secondary-button" type="button" id="adminRefreshButton">Обновить данные</button>
-        </div>
-      </header>
-
-      <section class="admin-summary">
-        <article class="admin-summary__card">
-          <strong>${escapeHtml(String(state.adminData.categories.length))}</strong>
-          <span>категории</span>
-        </article>
-        <article class="admin-summary__card">
-          <strong>${escapeHtml(String(state.adminData.practices.length))}</strong>
-          <span>практики</span>
-        </article>
-        <article class="admin-summary__card">
-          <strong>${escapeHtml(String(state.adminData.banners.length))}</strong>
-          <span>баннеры</span>
-        </article>
-      </section>
-
-      <div class="admin-grid">
-        ${renderAdminSection("categories")}
-        ${renderAdminSection("practices")}
-        ${renderAdminSection("banners")}
-      </div>
-    </section>
-  `;
-
-  bindAdminScreenEvents();
-  updateNavigationVisibility();
+  // Fallback: default to dashboard
+  state.adminSection = "dashboard";
+  renderAdminDashboard();
 }
 
 function renderErrorState(message) {
@@ -1710,11 +2103,19 @@ async function loadAdminData() {
       ? await apiRequest("/api/admin/users")
       : { users: [] };
 
+    let allUsersPayload = { users: [] };
+    try {
+      allUsersPayload = await apiRequest("/api/admin/all-users");
+    } catch (err) {
+      console.warn("Could not load all-users:", err.message);
+    }
+
     state.adminData = {
       categories: payload.categories || [],
       practices: payload.practices || [],
       banners: payload.banners || [],
       users: usersPayload.users || [],
+      allUsers: allUsersPayload.users || [],
     };
     return;
   }
@@ -1753,6 +2154,7 @@ async function loadAdminData() {
     practices,
     banners,
     users: [],
+    allUsers: [],
   };
 }
 
@@ -2019,10 +2421,12 @@ function bindAdminScreenEvents() {
   });
 }
 
+const ADMIN_NAV_SECTIONS = ["dashboard", "users", "chatbot", "content", "subscription", "monitoring", "profile"];
+
 function navigateTo(tabName) {
   if (isAdminUser()) {
     state.isAdminMode = true;
-    state.adminSection = tabName === "profile" ? "profile" : "dashboard";
+    state.adminSection = ADMIN_NAV_SECTIONS.includes(tabName) ? tabName : "dashboard";
     updateAdminToggleButtons();
     updateNavigationVisibility();
     renderAdminScreen();
