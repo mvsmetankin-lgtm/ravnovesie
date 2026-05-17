@@ -1686,9 +1686,8 @@ button {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
     position: fixed;
-    left: 50%;
-    transform: translateX(-50%);
-    width: min(calc(100vw - 28px), 390px);
+    left: 14px;
+    right: 14px;
     bottom: max(14px, env(safe-area-inset-bottom, 0px));
     z-index: 40;
     padding: 10px 0;
