@@ -1683,18 +1683,15 @@ button {
   }
 
   .bottom-nav {
-    display: flex;
-    align-items: flex-start;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
     position: fixed;
     left: 50%;
     transform: translateX(-50%);
     width: min(calc(100vw - 28px), 390px);
     bottom: max(14px, env(safe-area-inset-bottom, 0px));
     z-index: 40;
-    padding:
-      clamp(8px, 2.2vw, 11px)
-      8px
-      calc(clamp(10px, 2.4vw, 13px) + env(safe-area-inset-bottom, 0px) * 0.12);
+    padding: 10px 0;
     border-radius: 30px;
     background: rgba(255, 255, 255, 0.92);
     backdrop-filter: blur(18px);
@@ -1714,50 +1711,43 @@ button {
   }
 
   .bottom-nav.is-admin-only {
-    justify-content: space-evenly;
+    grid-template-columns: repeat(2, 1fr);
   }
 
   .bottom-nav__item {
-    display: grid;
-    grid-template-rows: 34px 28px;
-    justify-items: center;
-    align-items: start;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
     gap: 4px;
-    padding: 6px 4px 4px;
-    flex: 1 1 0;
-    min-width: 0;
+    padding: 4px 0;
     font-size: 11px;
     font-weight: 700;
     text-align: center;
     color: #7d8ba8;
+    cursor: pointer;
+    transition: color 160ms ease, transform 160ms ease;
+    background: transparent;
   }
 
   .bottom-nav__icon {
-    width: 34px;
-    height: 34px;
-    border-radius: 16px;
-    padding: 6px;
-    background: transparent;
-    justify-self: center;
-    transition:
-      background-color 160ms ease,
-      color 160ms ease,
-      box-shadow 160ms ease;
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
   }
 
   .bottom-nav__item > span:not(.bottom-nav__icon) {
-    display: block;
-    width: 100%;
-    line-height: 1.15;
-    text-align: center;
-    letter-spacing: -0.01em;
+    line-height: 1.2;
   }
 
   .bottom-nav__item:hover,
   .bottom-nav__item:focus-visible {
-    background: transparent;
     color: var(--text);
     transform: translateY(-1px);
+    background: transparent;
   }
 
   .bottom-nav__item.is-active {
@@ -1767,7 +1757,6 @@ button {
 
   .bottom-nav__item.is-active .bottom-nav__icon {
     background: transparent;
-    box-shadow: none;
   }
 
   .admin-summary,
