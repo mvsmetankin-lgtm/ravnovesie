@@ -1673,5 +1673,5 @@ app.delete("/api/admin/:section/:id", requireAuth, requireAdmin, async (req, res
 });
 
 app.listen(Number(PORT), () => {
-  console.log(`MindFlow Telegram auth server listening on ${PORT}`);
+  console.log(`Равновесие Telegram auth server listening on ${PORT}`);
 });
