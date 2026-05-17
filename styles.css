@@ -1705,8 +1705,7 @@ button {
   }
 
   .mobile-bottom-nav {
-    display: flex;
-    flex-direction: row;
+    display: grid;
   }
 
   .bottom-nav.is-admin-only {
