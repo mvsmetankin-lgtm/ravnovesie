@@ -1312,6 +1312,12 @@ function renderDiaryScreen() {
           }
         </div>
 
+        <button class="chat-scroll-btn" id="chatScrollBtn" aria-label="Вниз" hidden>
+          <svg viewBox="0 0 24 24" fill="none" width="20" height="20">
+            <path d="M12 5v14M5 15l7 7 7-7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+
         <div class="chat-footer">
           ${
             showMoodPicker
@@ -1381,6 +1387,16 @@ function renderDiaryScreen() {
   });
 
   requestAnimationFrame(scrollChatToBottom);
+
+  const chatThread = document.getElementById("chatThread");
+  const chatScrollBtn = document.getElementById("chatScrollBtn");
+
+  chatThread?.addEventListener("scroll", () => {
+    const distanceFromBottom = chatThread.scrollHeight - chatThread.scrollTop - chatThread.clientHeight;
+    chatScrollBtn.hidden = distanceFromBottom < 80;
+  });
+
+  chatScrollBtn?.addEventListener("click", scrollChatToBottom);
 }
 
 function renderHomeScreen(data) {
