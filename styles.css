@@ -1684,7 +1684,6 @@ button {
 
   .bottom-nav {
     display: flex;
-    justify-content: space-evenly;
     align-items: flex-start;
     position: fixed;
     left: 50%;
@@ -1694,7 +1693,7 @@ button {
     z-index: 40;
     padding:
       clamp(8px, 2.2vw, 11px)
-      0
+      8px
       calc(clamp(10px, 2.4vw, 13px) + env(safe-area-inset-bottom, 0px) * 0.12);
     border-radius: 30px;
     background: rgba(255, 255, 255, 0.92);
@@ -1725,7 +1724,7 @@ button {
     align-items: start;
     gap: 4px;
     padding: 6px 4px 4px;
-    flex: 1;
+    flex: 1 1 0;
     min-width: 0;
     font-size: 11px;
     font-weight: 700;
