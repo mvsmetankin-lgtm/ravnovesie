@@ -1391,12 +1391,18 @@ function renderDiaryScreen() {
   const chatThread = document.getElementById("chatThread");
   const chatScrollBtn = document.getElementById("chatScrollBtn");
 
-  chatThread?.addEventListener("scroll", () => {
-    const distanceFromBottom = chatThread.scrollHeight - chatThread.scrollTop - chatThread.clientHeight;
-    chatScrollBtn.hidden = distanceFromBottom < 80;
-  });
+  function updateChatScrollBtn() {
+    if (!chatThread || !chatScrollBtn) return;
+    const rect = chatThread.getBoundingClientRect();
+    chatScrollBtn.hidden = rect.bottom <= window.innerHeight + 80;
+  }
 
-  chatScrollBtn?.addEventListener("click", scrollChatToBottom);
+  window.addEventListener("scroll", updateChatScrollBtn, { passive: true });
+  updateChatScrollBtn();
+
+  chatScrollBtn?.addEventListener("click", () => {
+    chatThread.scrollIntoView({ block: "end", behavior: "smooth" });
+  });
 }
 
 function renderHomeScreen(data) {
