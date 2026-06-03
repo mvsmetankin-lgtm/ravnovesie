@@ -1034,6 +1034,35 @@ app.get("/api/profile", requireAuth, async (req, res) => {
   }
 });
 
+app.delete("/api/account", requireAuth, async (req, res) => {
+  try {
+    const profile = await getProfile(req.auth.sub);
+    const authEmail = String(req.auth.email || "").toLowerCase();
+
+    if (
+      authEmail === SUPER_ADMIN_EMAIL.toLowerCase() ||
+      profile?.is_super_admin ||
+      profile?.email?.toLowerCase() === SUPER_ADMIN_EMAIL.toLowerCase()
+    ) {
+      throw new Error("Главного администратора нельзя удалить.");
+    }
+
+    const { error: deleteAuthError } = await supabaseAdmin.auth.admin.deleteUser(req.auth.sub);
+    if (deleteAuthError) {
+      throw deleteAuthError;
+    }
+
+    const { error: deleteProfileError } = await supabaseAdmin.from("user").delete().eq("id", req.auth.sub);
+    if (deleteProfileError) {
+      throw deleteProfileError;
+    }
+
+    res.json({ ok: true });
+  } catch (error) {
+    res.status(400).json({ error: error.message || "Не удалось удалить аккаунт." });
+  }
+});
+
 app.get("/api/home", requireAuth, async (req, res) => {
   try {
     const [profile, home] = await Promise.all([

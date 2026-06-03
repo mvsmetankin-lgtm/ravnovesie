@@ -22,6 +22,10 @@ const telegramAuth = document.getElementById("telegramAuth");
 const telegramLoginButton = document.getElementById("telegramLoginButton");
 const appStatus = document.getElementById("appStatus");
 const appContent = document.getElementById("appContent");
+const deleteAccountModal = document.getElementById("deleteAccountModal");
+const deleteAccountButton = document.getElementById("deleteAccountButton");
+const confirmDeleteAccountButton = document.getElementById("confirmDeleteAccountButton");
+const cancelDeleteAccountButton = document.getElementById("cancelDeleteAccountButton");
 const bottomNav = document.getElementById("bottomNav");
 const globalAdminToggle = document.getElementById("globalAdminToggle");
 const sidebarAdminToggle = document.getElementById("sidebarAdminToggle");
@@ -417,6 +421,47 @@ async function loadSupabaseSession() {
       error,
     };
   }
+}
+
+function resetClientSessionState() {
+  state.authMode = "supabase";
+  state.apiToken = "";
+  state.session = null;
+  state.profile = null;
+  state.homeFeed = null;
+  state.homeState = "loading";
+  state.diaryData = null;
+  state.diaryFilter = "all";
+  state.diaryEditingId = null;
+  state.chatData = null;
+  state.chatState = "idle";
+  state.chatBusy = false;
+  state.isAdminMode = false;
+  state.adminSection = "dashboard";
+  updateAdminToggleButtons();
+  updateNavigationVisibility();
+}
+
+function showAuthView() {
+  closeDeleteAccountModal();
+  pageShell.classList.remove("is-app-mode");
+  appView.classList.add("is-hidden");
+  authView.classList.remove("is-hidden");
+  setActiveAuthScreen("login");
+  updateTelegramAuthUi();
+}
+
+function openDeleteAccountModal() {
+  deleteAccountModal?.classList.remove("is-hidden");
+  deleteAccountModal?.setAttribute("aria-hidden", "false");
+  document.body.classList.add("modal-open");
+  confirmDeleteAccountButton?.focus();
+}
+
+function closeDeleteAccountModal() {
+  deleteAccountModal?.classList.add("is-hidden");
+  deleteAccountModal?.setAttribute("aria-hidden", "true");
+  document.body.classList.remove("modal-open");
 }
 
 function updateAdminToggleButtons() {
@@ -2119,6 +2164,9 @@ function renderTabScreen(tabName) {
           <p>${escapeHtml(state.profile?.email || state.session?.user?.email || "")}</p>
         </section>
         <div class="profile-actions">
+          <button class="secondary-button danger-button" type="button" id="deleteAccountButton">
+            Удалить аккаунт
+          </button>
           <button class="secondary-button" type="button" id="logoutButton">Выйти из аккаунта</button>
         </div>
       `
@@ -2147,7 +2195,14 @@ function renderTabScreen(tabName) {
     </section>
   `;
 
+  const deleteAccountTrigger = document.getElementById("deleteAccountButton");
   const logoutButton = document.getElementById("logoutButton");
+
+  if (deleteAccountTrigger) {
+    deleteAccountTrigger.addEventListener("click", () => {
+      openDeleteAccountModal();
+    });
+  }
 
   if (logoutButton) {
     logoutButton.addEventListener("click", async () => {
@@ -2629,27 +2684,37 @@ async function logout() {
     }
   }
 
-  state.authMode = "supabase";
-  state.apiToken = "";
-  state.session = null;
-  state.profile = null;
-  state.homeFeed = null;
-  state.homeState = "loading";
-  state.diaryData = null;
-  state.diaryFilter = "all";
-  state.diaryEditingId = null;
-  state.chatData = null;
-  state.chatState = "idle";
-  state.chatBusy = false;
-  state.isAdminMode = false;
-  state.adminSection = "dashboard";
-  pageShell.classList.remove("is-app-mode");
-  appView.classList.add("is-hidden");
-  authView.classList.remove("is-hidden");
-  setActiveAuthScreen("login");
+  resetClientSessionState();
+  showAuthView();
   setAuthStatus("Вы вышли из аккаунта.");
-  updateAdminToggleButtons();
-  updateNavigationVisibility();
+}
+
+async function deleteAccount() {
+  const confirmButton = confirmDeleteAccountButton;
+
+  if (confirmButton) {
+    confirmButton.disabled = true;
+  }
+
+  try {
+    setAppStatus("Удаляем аккаунт...");
+    await apiRequest("/api/account", { method: "DELETE" });
+    closeDeleteAccountModal();
+
+    if (!isTelegramSession()) {
+      await supabaseClient.auth.signOut({ scope: "local" }).catch(() => {});
+    }
+
+    resetClientSessionState();
+    showAuthView();
+    setAuthStatus("Аккаунт удалён.", "success");
+  } catch (error) {
+    setAppStatus(error.message || "Не удалось удалить аккаунт.", "error");
+  } finally {
+    if (confirmButton) {
+      confirmButton.disabled = false;
+    }
+  }
 }
 
 async function loadCurrentUserProfile() {
@@ -3184,6 +3249,20 @@ telegramLoginButton?.addEventListener("click", async () => {
   }
 });
 
+deleteAccountModal?.addEventListener("click", (event) => {
+  if (event.target instanceof HTMLElement && event.target.dataset.deleteAccountClose === "true") {
+    closeDeleteAccountModal();
+  }
+});
+
+cancelDeleteAccountButton?.addEventListener("click", () => {
+  closeDeleteAccountModal();
+});
+
+confirmDeleteAccountButton?.addEventListener("click", async () => {
+  await deleteAccount();
+});
+
 adminNavButtons.forEach((button) => {
   button.addEventListener("click", () => {
     state.adminSection = button.dataset.adminNav;
@@ -3220,8 +3299,15 @@ reelOverlay?.addEventListener("click", (event) => {
 });
 
 window.addEventListener("keydown", (event) => {
-  if (event.key === "Escape" && state.activeReel) {
-    closeReel();
+  if (event.key === "Escape") {
+    if (deleteAccountModal && !deleteAccountModal.classList.contains("is-hidden")) {
+      closeDeleteAccountModal();
+      return;
+    }
+
+    if (state.activeReel) {
+      closeReel();
+    }
   }
 });
 
