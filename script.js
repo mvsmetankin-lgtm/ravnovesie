@@ -330,10 +330,19 @@ async function apiRequest(path, options = {}) {
     headers.set("Authorization", `Bearer ${state.apiToken}`);
   }
 
-  const response = await fetch(path, {
-    ...options,
-    headers,
-  });
+  let response;
+  try {
+    response = await fetch(path, {
+      ...options,
+      headers,
+    });
+  } catch (error) {
+    throw new Error(
+      `Не удалось подключиться к backend по адресу ${new URL(path, window.location.origin).href}. ` +
+        `Проверь, что фронт открыт с правильного домена и порта, а /api проксируется на backend.`,
+    );
+  }
+
   const payload = await response.json().catch(() => ({}));
 
   if (!response.ok) {
