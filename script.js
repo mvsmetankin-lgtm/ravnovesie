@@ -2119,7 +2119,6 @@ function renderTabScreen(tabName) {
           <p>${escapeHtml(state.profile?.email || state.session?.user?.email || "")}</p>
         </section>
         <div class="profile-actions">
-          <button class="secondary-button" type="button" id="refreshHomeButton">Обновить главную</button>
           <button class="secondary-button" type="button" id="logoutButton">Выйти из аккаунта</button>
         </div>
       `
@@ -2148,17 +2147,7 @@ function renderTabScreen(tabName) {
     </section>
   `;
 
-  const refreshButton = document.getElementById("refreshHomeButton");
   const logoutButton = document.getElementById("logoutButton");
-
-  if (refreshButton) {
-    refreshButton.addEventListener("click", async () => {
-      setAppStatus("Обновляем контент главной страницы...");
-      await refreshHomeFeed();
-      setAppStatus("Данные обновлены.", "success");
-      navigateTo("home");
-    });
-  }
 
   if (logoutButton) {
     logoutButton.addEventListener("click", async () => {
