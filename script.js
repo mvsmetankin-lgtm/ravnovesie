@@ -84,6 +84,15 @@ const tabLabels = {
 
 const REQUEST_TIMEOUT_MS = 3500;
 const REEL_DURATION_MS = 10000;
+const API_BASE_URL = (() => {
+  const { hostname, port, origin } = window.location;
+
+  if (hostname === "ravnovesie.duckdns.org" && port !== "8444") {
+    return "https://ravnovesie.duckdns.org:8444";
+  }
+
+  return origin;
+})();
 
 const DEFAULT_HOME_CONTENT = {
   categories: [
@@ -332,13 +341,13 @@ async function apiRequest(path, options = {}) {
 
   let response;
   try {
-    response = await fetch(path, {
+    response = await fetch(new URL(path, API_BASE_URL).href, {
       ...options,
       headers,
     });
   } catch (error) {
     throw new Error(
-      `Не удалось подключиться к backend по адресу ${new URL(path, window.location.origin).href}. ` +
+      `Не удалось подключиться к backend по адресу ${new URL(path, API_BASE_URL).href}. ` +
         `Проверь, что фронт открыт с правильного домена и порта, а /api проксируется на backend.`,
     );
   }
