@@ -852,9 +852,12 @@ body.modal-open {
   position: fixed;
   inset: 0;
   z-index: 60;
-  display: grid;
-  place-items: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   padding: 24px;
+  opacity: 1;
+  transition: opacity 160ms ease;
 }
 
 .modal__backdrop {
@@ -873,6 +876,20 @@ body.modal-open {
   background: rgba(255, 255, 255, 0.94);
   box-shadow: 0 24px 70px rgba(15, 23, 42, 0.2);
   border: 1px solid rgba(148, 163, 184, 0.18);
+  transform: translateY(0) scale(1);
+  transition:
+    transform 180ms ease,
+    opacity 180ms ease;
+}
+
+.modal.is-hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.modal.is-hidden .modal__panel {
+  opacity: 0;
+  transform: translateY(10px) scale(0.98);
 }
 
 .modal__title {
