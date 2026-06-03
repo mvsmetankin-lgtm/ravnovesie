@@ -5,6 +5,13 @@ const SUPABASE_ANON_KEY =
 const supabaseClient = window.supabase.createClient(
   SUPABASE_URL,
   SUPABASE_ANON_KEY,
+  {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: true,
+      detectSessionInUrl: false,
+    },
+  },
 );
 
 const pageShell = document.getElementById("pageShell");
@@ -397,6 +404,18 @@ function setAppStatus(message = "", type = "info") {
     setAppStatus._timer = setTimeout(() => {
       setAppStatus();
     }, 3000);
+  }
+}
+
+async function loadSupabaseSession() {
+  try {
+    return await supabaseClient.auth.getSession();
+  } catch (error) {
+    await supabaseClient.auth.signOut({ scope: "local" }).catch(() => {});
+    return {
+      data: { session: null },
+      error,
+    };
   }
 }
 
@@ -3259,7 +3278,7 @@ async function bootstrap() {
 
   const {
     data: { session },
-  } = await supabaseClient.auth.getSession();
+  } = await loadSupabaseSession();
 
   if (session?.user) {
     await enterApp(session);
