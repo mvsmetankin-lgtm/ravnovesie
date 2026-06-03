@@ -370,6 +370,16 @@ function setAppStatus(message = "", type = "info") {
   appStatus.classList.remove("is-hidden");
   appStatus.classList.toggle("is-success", type === "success");
   appStatus.classList.toggle("is-error", type === "error");
+
+  // Auto-dismiss success messages after 3 seconds
+  if (type === "success") {
+    if (setAppStatus._timer) {
+      clearTimeout(setAppStatus._timer);
+    }
+    setAppStatus._timer = setTimeout(() => {
+      setAppStatus();
+    }, 3000);
+  }
 }
 
 function updateAdminToggleButtons() {
@@ -1126,21 +1136,35 @@ function renderAdminMonitoring() {
     if (!grid) return;
 
     let apiOk = false;
+    let dbOk = false;
     try {
       const payload = await apiRequest("/api/health");
       apiOk = Boolean(payload?.ok);
+      // DB is considered OK if the API responded (it means Supabase is reachable)
+      dbOk = apiOk;
     } catch {
       apiOk = false;
+      dbOk = false;
+    }
+
+    // Perform a separate lightweight DB probe via Supabase client if available
+    if (apiOk && typeof supabaseClient !== "undefined") {
+      try {
+        const { error } = await supabaseClient.from("user").select("id").limit(1).maybeSingle();
+        dbOk = !error;
+      } catch {
+        dbOk = false;
+      }
     }
 
     const apiIconClass = apiOk ? "admin-status-item__icon--ok" : "admin-status-item__icon--error";
     const apiIcon = apiOk ? "✓" : "✗";
     const apiValue = apiOk ? "OK" : "Ошибка";
     const apiValueClass = apiOk ? "admin-status-item__value--ok" : "admin-status-item__value--error";
-    const dbIconClass = apiOk ? "admin-status-item__icon--ok" : "admin-status-item__icon--error";
-    const dbIcon = apiOk ? "✓" : "✗";
-    const dbValue = apiOk ? "OK" : "Ошибка";
-    const dbValueClass = apiOk ? "admin-status-item__value--ok" : "admin-status-item__value--error";
+    const dbIconClass = dbOk ? "admin-status-item__icon--ok" : "admin-status-item__icon--error";
+    const dbIcon = dbOk ? "✓" : "✗";
+    const dbValue = dbOk ? "OK" : "Ошибка";
+    const dbValueClass = dbOk ? "admin-status-item__value--ok" : "admin-status-item__value--error";
 
     grid.innerHTML = `
       <div class="admin-status-item">
@@ -1734,6 +1758,9 @@ function renderDiaryScreen() {
               ${composerDisabled ? "disabled" : ""}
               required
             ></textarea>
+            <div class="chat-composer__meta">
+              <span class="chat-word-counter" id="chatWordCounter">0 слов</span>
+            </div>
             <button class="chat-send-button" type="submit" ${composerDisabled ? "disabled" : ""} aria-label="Отправить">
               <svg viewBox="0 0 24 24" fill="none">
                 <path d="M4 19 20 12 4 5l2.5 6.2L15 12l-8.5.8L4 19Z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
@@ -1751,13 +1778,26 @@ function renderDiaryScreen() {
   chatComposer?.addEventListener("submit", async (event) => {
     event.preventDefault();
     const formData = new FormData(event.currentTarget);
-    await sendChatMessage(formData.get("message"));
+    const text = formData.get("message");
+    event.currentTarget.reset();
+    const counter = document.getElementById("chatWordCounter");
+    if (counter) counter.textContent = "0 слов";
+    await sendChatMessage(text);
+  });
+
+  chatInput?.addEventListener("input", () => {
+    const counter = document.getElementById("chatWordCounter");
+    if (!counter) return;
+    const words = countWords(chatInput.value);
+    counter.textContent = `${words} ${words === 1 ? "слово" : words >= 2 && words <= 4 ? "слова" : "слов"}`;
   });
 
   chatInput?.addEventListener("keydown", async (event) => {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
-      await sendChatMessage(chatInput.value);
+      const text = chatInput.value;
+      chatInput.value = "";
+      await sendChatMessage(text);
     }
   });
 
@@ -2424,9 +2464,17 @@ function bindAdminScreenEvents() {
 const ADMIN_NAV_SECTIONS = ["dashboard", "users", "chatbot", "content", "subscription", "monitoring", "profile"];
 
 function navigateTo(tabName) {
-  if (isAdminUser()) {
+  const isAdminSection = ADMIN_NAV_SECTIONS.includes(tabName);
+
+  if (state.isAdminMode && !isAdminSection) {
+    // Admin is navigating to a regular tab — exit admin mode
+    state.isAdminMode = false;
+  } else if (isAdminSection && isAdminUser()) {
     state.isAdminMode = true;
-    state.adminSection = ADMIN_NAV_SECTIONS.includes(tabName) ? tabName : "dashboard";
+  }
+
+  if (state.isAdminMode) {
+    state.adminSection = isAdminSection ? tabName : "dashboard";
     updateAdminToggleButtons();
     updateNavigationVisibility();
     renderAdminScreen();
@@ -2434,7 +2482,6 @@ function navigateTo(tabName) {
   }
 
   state.currentTab = tabName;
-  state.isAdminMode = false;
   updateAdminToggleButtons();
   updateNavigationVisibility();
 
