@@ -2320,6 +2320,16 @@ async function loadPracticesData() {
 
   const { type, goal, duration } = state.practicesFilters;
 
+  if (isTelegramSession()) {
+    const params = new URLSearchParams();
+    if (type) params.set("type", type);
+    if (goal) params.set("goal", goal);
+    if (duration) params.set("duration", duration);
+    const qs = params.toString();
+    const payload = await apiRequest(`/api/practices${qs ? "?" + qs : ""}`);
+    return payload.practices || [];
+  }
+
   let query = supabaseClient
     .from("practices")
     .select("id, title, description, type, goal, tags, duration_minutes, level, image_url, video_url, is_featured, sort_order, views_count, likes_count, dislikes_count")
@@ -2340,6 +2350,11 @@ async function loadUserPracticeLike(practiceId) {
   const authUser = state.session?.user;
   if (!authUser) return null;
 
+  if (isTelegramSession()) {
+    const payload = await apiRequest(`/api/practices/${practiceId}/like`);
+    return payload.value ?? null;
+  }
+
   const { data } = await supabaseClient
     .from("practice_likes")
     .select("value")
@@ -2355,31 +2370,33 @@ async function togglePracticeLike(practiceId, newValue) {
   if (!authUser) return;
 
   const current = state.activePractice?.userLike ?? null;
+  const sendValue = current === newValue ? null : newValue;
+
+  if (isTelegramSession()) {
+    const result = await apiRequest(`/api/practices/${practiceId}/like`, {
+      method: "POST",
+      body: JSON.stringify({ value: sendValue }),
+    });
+    state.activePractice.userLike = sendValue;
+    if (state.activePractice) {
+      state.activePractice.practice.likes_count = result.likes_count ?? state.activePractice.practice.likes_count;
+      state.activePractice.practice.dislikes_count = result.dislikes_count ?? state.activePractice.practice.dislikes_count;
+    }
+    renderPracticeCardView();
+    return;
+  }
 
   if (current === newValue) {
-    await supabaseClient
-      .from("practice_likes")
-      .delete()
-      .eq("user_id", authUser.id)
-      .eq("practice_id", practiceId);
+    await supabaseClient.from("practice_likes").delete().eq("user_id", authUser.id).eq("practice_id", practiceId);
     state.activePractice.userLike = null;
   } else {
-    await supabaseClient
-      .from("practice_likes")
-      .upsert({ user_id: authUser.id, practice_id: practiceId, value: newValue }, { onConflict: "user_id,practice_id" });
+    await supabaseClient.from("practice_likes").upsert({ user_id: authUser.id, practice_id: practiceId, value: newValue }, { onConflict: "user_id,practice_id" });
     state.activePractice.userLike = newValue;
   }
 
-  if (supabaseClient.rpc) {
-    await supabaseClient.rpc("update_practice_like_counts", { p_id: practiceId });
-  }
+  await supabaseClient.rpc("update_practice_like_counts", { p_id: practiceId }).catch(() => {});
 
-  const { data } = await supabaseClient
-    .from("practices")
-    .select("likes_count, dislikes_count")
-    .eq("id", practiceId)
-    .single();
-
+  const { data } = await supabaseClient.from("practices").select("likes_count, dislikes_count").eq("id", practiceId).single();
   if (data && state.activePractice) {
     state.activePractice.practice.likes_count = data.likes_count;
     state.activePractice.practice.dislikes_count = data.dislikes_count;
@@ -2491,10 +2508,11 @@ async function openPractice(practiceId) {
   state.activePractice = { practice, userLike: null };
   renderPracticeCardView();
 
-  const [userLike] = await Promise.all([
-    loadUserPracticeLike(practiceId),
-    supabaseClient.rpc("increment_practice_views", { p_id: practiceId }).catch(() => {}),
-  ]);
+  const incrementView = isTelegramSession()
+    ? apiRequest(`/api/practices/${practiceId}/view`, { method: "POST" }).catch(() => {})
+    : supabaseClient.rpc("increment_practice_views", { p_id: practiceId }).catch(() => {});
+
+  const [userLike] = await Promise.all([loadUserPracticeLike(practiceId), incrementView]);
 
   state.activePractice.userLike = userLike;
   practice.views_count = (practice.views_count || 0) + 1;

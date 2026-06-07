@@ -1063,6 +1063,66 @@ app.delete("/api/account", requireAuth, async (req, res) => {
   }
 });
 
+app.get("/api/practices", requireAuth, async (req, res) => {
+  try {
+    const { type, goal, duration } = req.query;
+    let query = supabaseAdmin
+      .from("practices")
+      .select("id, title, description, type, goal, tags, duration_minutes, level, image_url, video_url, is_featured, sort_order, views_count, likes_count, dislikes_count")
+      .order("sort_order", { ascending: true });
+
+    if (type) query = query.eq("type", type);
+    if (goal) query = query.eq("goal", goal);
+    if (duration === "short") query = query.lte("duration_minutes", 10);
+    if (duration === "medium") query = query.gt("duration_minutes", 10).lte("duration_minutes", 30);
+    if (duration === "long") query = query.gt("duration_minutes", 30);
+
+    const { data, error } = await query;
+    if (error) throw error;
+    res.json({ practices: data || [] });
+  } catch (error) {
+    res.status(500).json({ error: error.message || "Не удалось загрузить практики." });
+  }
+});
+
+app.post("/api/practices/:id/like", requireAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { value } = req.body;
+    const userId = req.auth.sub;
+
+    if (value === null || value === undefined) {
+      await supabaseAdmin.from("practice_likes").delete().eq("user_id", userId).eq("practice_id", id);
+    } else {
+      await supabaseAdmin.from("practice_likes").upsert({ user_id: userId, practice_id: id, value }, { onConflict: "user_id,practice_id" });
+    }
+
+    await supabaseAdmin.rpc("update_practice_like_counts", { p_id: id });
+    const { data } = await supabaseAdmin.from("practices").select("likes_count, dislikes_count").eq("id", id).single();
+    res.json(data || {});
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get("/api/practices/:id/like", requireAuth, async (req, res) => {
+  try {
+    const { data } = await supabaseAdmin.from("practice_likes").select("value").eq("user_id", req.auth.sub).eq("practice_id", req.params.id).maybeSingle();
+    res.json({ value: data?.value ?? null });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post("/api/practices/:id/view", requireAuth, async (req, res) => {
+  try {
+    await supabaseAdmin.rpc("increment_practice_views", { p_id: req.params.id });
+    res.json({ ok: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.get("/api/home", requireAuth, async (req, res) => {
   try {
     const [profile, home] = await Promise.all([
