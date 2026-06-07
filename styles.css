@@ -1773,8 +1773,11 @@ body.modal-open {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
     position: fixed;
-    left: 14px;
-    right: 14px;
+    left: 0;
+    right: 0;
+    width: calc(100% - 28px);
+    max-width: 362px;
+    margin: 0 auto;
     bottom: max(14px, env(safe-area-inset-bottom, 0px));
     z-index: 40;
     padding: 10px 0;
@@ -2217,10 +2220,12 @@ body.modal-open {
   .quick-actions {
     grid-template-columns: 1fr;
     display: grid;
+    overflow: hidden;
   }
 
   .quick-action {
     width: 100%;
+    min-width: 0;
     justify-content: flex-start;
     padding: 12px 14px;
   }
