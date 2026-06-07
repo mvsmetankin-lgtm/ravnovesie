@@ -488,6 +488,7 @@ button {
 .diary-screen {
   display: grid;
   gap: 18px;
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .home-header,
@@ -2220,11 +2221,10 @@ body.modal-open {
   .quick-actions {
     grid-template-columns: 1fr;
     display: grid;
-    overflow: hidden;
   }
 
   .quick-action {
-    width: 100%;
+    display: flex;
     min-width: 0;
     justify-content: flex-start;
     padding: 12px 14px;
