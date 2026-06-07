@@ -77,6 +77,10 @@ const state = {
   },
   reelTimer: null,
   activeReel: null,
+  practicesState: "idle",
+  practicesData: null,
+  practicesFilters: { type: "", goal: "", duration: "" },
+  activePractice: null,
 };
 
 const authScreenMessages = {
@@ -230,10 +234,25 @@ const ADMIN_SECTIONS = {
     description: "Карточки блока Практики для тебя.",
     fields: [
       { name: "title", label: "Название", type: "text", required: true },
-      { name: "subtitle", label: "Подзаголовок", type: "text" },
-      { name: "duration_minutes", label: "Минут", type: "number" },
+      { name: "description", label: "Описание", type: "textarea" },
+      { name: "type", label: "Тип", type: "select", options: [
+        { value: "", label: "— выберите —" },
+        { value: "breathing", label: "Дыхание" },
+        { value: "meditation", label: "Медитация" },
+        { value: "yoga", label: "Йога" },
+        { value: "sounds", label: "Звуки" },
+      ]},
+      { name: "goal", label: "Цель", type: "select", options: [
+        { value: "", label: "— выберите —" },
+        { value: "calm", label: "Снизить тревогу" },
+        { value: "relax", label: "Расслабиться" },
+        { value: "focus", label: "Сфокусироваться" },
+      ]},
+      { name: "tags", label: "Теги (через запятую)", type: "text" },
+      { name: "duration_minutes", label: "Длительность (минуты)", type: "number" },
       { name: "level", label: "Уровень", type: "text" },
       { name: "image_url", label: "Изображение URL", type: "url" },
+      { name: "video_url", label: "Видео URL", type: "url" },
       { name: "sort_order", label: "Порядок", type: "number" },
       { name: "is_featured", label: "Показывать на Дом", type: "checkbox" },
     ],
@@ -436,6 +455,10 @@ function resetClientSessionState() {
   state.chatData = null;
   state.chatState = "idle";
   state.chatBusy = false;
+  state.practicesData = null;
+  state.practicesState = "idle";
+  state.practicesFilters = { type: "", goal: "", duration: "" };
+  state.activePractice = null;
   state.isAdminMode = false;
   state.adminSection = "dashboard";
   updateAdminToggleButtons();
@@ -743,7 +766,8 @@ function renderLoadingState(message) {
 }
 
 function renderAdminField(sectionName, field, selectedRecord) {
-  const value = selectedRecord?.[field.name];
+  const raw = selectedRecord?.[field.name];
+  const value = Array.isArray(raw) ? raw.join(", ") : raw;
 
   if (field.type === "checkbox") {
     return `
@@ -754,6 +778,27 @@ function renderAdminField(sectionName, field, selectedRecord) {
           ${value ?? true ? "checked" : ""}
         />
         <span>${escapeHtml(field.label)}</span>
+      </label>
+    `;
+  }
+
+  if (field.type === "textarea") {
+    return `
+      <label class="admin-field">
+        <span>${escapeHtml(field.label)}</span>
+        <textarea name="${escapeHtml(field.name)}" rows="3">${escapeHtml(value ?? "")}</textarea>
+      </label>
+    `;
+  }
+
+  if (field.type === "select") {
+    const options = (field.options || []).map((opt) =>
+      `<option value="${escapeHtml(opt.value)}" ${String(value ?? "") === opt.value ? "selected" : ""}>${escapeHtml(opt.label)}</option>`
+    ).join("");
+    return `
+      <label class="admin-field">
+        <span>${escapeHtml(field.label)}</span>
+        <select name="${escapeHtml(field.name)}">${options}</select>
       </label>
     `;
   }
@@ -2119,6 +2164,38 @@ function renderTabScreen(tabName) {
       "Профиль уже связан с Supabase и может показывать данные пользователя, настройки и выход.",
   };
 
+  if (tabName === "practices") {
+    if (state.activePractice) {
+      renderPracticeCardView();
+      return;
+    }
+    if (state.practicesState === "loading") {
+      renderLoadingState("Загружаем практики…");
+      return;
+    }
+    if (!state.practicesData) {
+      state.practicesState = "loading";
+      renderLoadingState("Загружаем практики…");
+      loadPracticesData()
+        .then((data) => {
+          state.practicesData = data;
+          state.practicesState = "ready";
+          if (state.currentTab === "practices" && !state.isAdminMode) {
+            renderPracticesScreen();
+          }
+        })
+        .catch(() => {
+          state.practicesState = "error";
+          if (state.currentTab === "practices" && !state.isAdminMode) {
+            renderErrorState("Не удалось загрузить практики.");
+          }
+        });
+      return;
+    }
+    renderPracticesScreen();
+    return;
+  }
+
   if (tabName === "diary") {
     if (state.chatState === "loading") {
       renderLoadingState("Загружаем историю чата и предыдущие сессии.");
@@ -2209,6 +2286,307 @@ function renderTabScreen(tabName) {
       await logout();
     });
   }
+}
+
+function formatDuration(minutes) {
+  if (!minutes) return "00:00";
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
+const PRACTICE_TYPES = {
+  breathing: "Дыхание",
+  meditation: "Медитация",
+  yoga: "Йога",
+  sounds: "Звуки",
+};
+
+const PRACTICE_GOALS = {
+  calm: "Снизить тревогу",
+  relax: "Расслабиться",
+  focus: "Сфокусироваться",
+};
+
+const PRACTICE_DURATIONS = {
+  short: { label: "До 10 мин", max: 10 },
+  medium: { label: "10–30 мин", min: 10, max: 30 },
+  long: { label: "Больше 30 мин", min: 30 },
+};
+
+async function loadPracticesData() {
+  const authUser = state.session?.user;
+  if (!authUser) return [];
+
+  const { type, goal, duration } = state.practicesFilters;
+
+  let query = supabaseClient
+    .from("practices")
+    .select("id, title, description, type, goal, tags, duration_minutes, level, image_url, video_url, is_featured, sort_order, views_count, likes_count, dislikes_count")
+    .order("sort_order", { ascending: true });
+
+  if (type) query = query.eq("type", type);
+  if (goal) query = query.eq("goal", goal);
+  if (duration === "short") query = query.lte("duration_minutes", 10);
+  if (duration === "medium") query = query.gt("duration_minutes", 10).lte("duration_minutes", 30);
+  if (duration === "long") query = query.gt("duration_minutes", 30);
+
+  const { data, error } = await query;
+  if (error) throw error;
+  return data || [];
+}
+
+async function loadUserPracticeLike(practiceId) {
+  const authUser = state.session?.user;
+  if (!authUser) return null;
+
+  const { data } = await supabaseClient
+    .from("practice_likes")
+    .select("value")
+    .eq("user_id", authUser.id)
+    .eq("practice_id", practiceId)
+    .maybeSingle();
+
+  return data?.value ?? null;
+}
+
+async function togglePracticeLike(practiceId, newValue) {
+  const authUser = state.session?.user;
+  if (!authUser) return;
+
+  const current = state.activePractice?.userLike ?? null;
+
+  if (current === newValue) {
+    await supabaseClient
+      .from("practice_likes")
+      .delete()
+      .eq("user_id", authUser.id)
+      .eq("practice_id", practiceId);
+    state.activePractice.userLike = null;
+  } else {
+    await supabaseClient
+      .from("practice_likes")
+      .upsert({ user_id: authUser.id, practice_id: practiceId, value: newValue }, { onConflict: "user_id,practice_id" });
+    state.activePractice.userLike = newValue;
+  }
+
+  if (supabaseClient.rpc) {
+    await supabaseClient.rpc("update_practice_like_counts", { p_id: practiceId });
+  }
+
+  const { data } = await supabaseClient
+    .from("practices")
+    .select("likes_count, dislikes_count")
+    .eq("id", practiceId)
+    .single();
+
+  if (data && state.activePractice) {
+    state.activePractice.practice.likes_count = data.likes_count;
+    state.activePractice.practice.dislikes_count = data.dislikes_count;
+  }
+
+  renderPracticeCardView();
+}
+
+function renderPracticeCardView() {
+  if (!state.activePractice) return;
+  const { practice, userLike } = state.activePractice;
+
+  const tags = (practice.tags || []).map((t) => `<span class="practice-tag">${escapeHtml(t)}</span>`).join("");
+  const typeLabel = practice.type ? PRACTICE_TYPES[practice.type] || practice.type : "";
+  const goalLabel = practice.goal ? PRACTICE_GOALS[practice.goal] || practice.goal : "";
+
+  const videoBlock = practice.video_url
+    ? `
+      <div class="practice-video-wrap">
+        <video
+          class="practice-video"
+          src="${escapeHtml(practice.video_url)}"
+          controls
+          playsinline
+          preload="metadata"
+          poster="${practice.image_url ? escapeHtml(practice.image_url) : ""}"
+        ></video>
+      </div>
+    `
+    : practice.image_url
+    ? `<div class="practice-cover" style="background-image:url('${escapeHtml(practice.image_url)}')"></div>`
+    : "";
+
+  const likedClass = userLike === 1 ? "is-active" : "";
+  const dislikedClass = userLike === -1 ? "is-active" : "";
+
+  appContent.innerHTML = `
+    <section class="practice-detail">
+      <header class="practice-detail__header">
+        <button class="icon-button" type="button" id="practiceBackBtn" aria-label="Назад">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M19 12H5M5 12l7 7M5 12l7-7" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <span class="practice-detail__label">${escapeHtml(typeLabel)}</span>
+        <button class="icon-button" type="button" id="practiceShareBtn" aria-label="Поделиться">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><circle cx="18" cy="5" r="3" stroke="currentColor" stroke-width="1.9"/><circle cx="6" cy="12" r="3" stroke="currentColor" stroke-width="1.9"/><circle cx="18" cy="19" r="3" stroke="currentColor" stroke-width="1.9"/><path d="M8.59 13.51l6.83 3.98M15.41 6.51l-6.82 3.98" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg>
+        </button>
+      </header>
+
+      ${videoBlock}
+
+      <div class="practice-detail__body">
+        <h1 class="practice-detail__title">${escapeHtml(practice.title)}</h1>
+
+        <div class="practice-detail__meta">
+          ${practice.duration_minutes ? `<span>⏱ ${formatDuration(practice.duration_minutes)}</span>` : ""}
+          ${practice.level ? `<span>${escapeHtml(practice.level)}</span>` : ""}
+          ${goalLabel ? `<span>${escapeHtml(goalLabel)}</span>` : ""}
+        </div>
+
+        <div class="practice-stats">
+          <span class="practice-stats__item">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" stroke="currentColor" stroke-width="1.9"/><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.9"/></svg>
+            ${escapeHtml(String(practice.views_count ?? 0))}
+          </span>
+          <button class="practice-like-btn ${likedClass}" type="button" data-practice-like="1" data-practice-id="${escapeHtml(practice.id)}">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="${userLike === 1 ? "currentColor" : "none"}"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3H14z" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/><path d="M7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg>
+            ${escapeHtml(String(practice.likes_count ?? 0))}
+          </button>
+          <button class="practice-like-btn practice-like-btn--dislike ${dislikedClass}" type="button" data-practice-like="-1" data-practice-id="${escapeHtml(practice.id)}">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="${userLike === -1 ? "currentColor" : "none"}"><path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3H10z" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/><path d="M17 2h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg>
+            ${escapeHtml(String(practice.dislikes_count ?? 0))}
+          </button>
+        </div>
+
+        ${practice.description ? `<p class="practice-detail__description">${escapeHtml(practice.description)}</p>` : ""}
+
+        ${tags ? `<div class="practice-tags">${tags}</div>` : ""}
+      </div>
+    </section>
+  `;
+
+  document.getElementById("practiceBackBtn")?.addEventListener("click", () => {
+    state.activePractice = null;
+    renderPracticesScreen();
+  });
+
+  document.getElementById("practiceShareBtn")?.addEventListener("click", () => {
+    const url = `${location.origin}${location.pathname}#practice-${practice.id}`;
+    navigator.clipboard?.writeText(url).then(() => setAppStatus("Ссылка скопирована", "info"));
+  });
+
+  appContent.querySelectorAll("[data-practice-like]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const val = Number(btn.dataset.practiceLike);
+      const pid = btn.dataset.practiceId;
+      try {
+        await togglePracticeLike(pid, val);
+      } catch (e) {
+        setAppStatus("Не удалось сохранить оценку", "error");
+      }
+    });
+  });
+}
+
+async function openPractice(practiceId) {
+  const practice = (state.practicesData || []).find((p) => p.id === practiceId);
+  if (!practice) return;
+
+  state.activePractice = { practice, userLike: null };
+  renderPracticeCardView();
+
+  const [userLike] = await Promise.all([
+    loadUserPracticeLike(practiceId),
+    supabaseClient.rpc("increment_practice_views", { p_id: practiceId }).catch(() => {}),
+  ]);
+
+  state.activePractice.userLike = userLike;
+  practice.views_count = (practice.views_count || 0) + 1;
+
+  renderPracticeCardView();
+}
+
+function renderPracticesScreen() {
+  const practices = state.practicesData || [];
+  const { type, goal, duration } = state.practicesFilters;
+
+  const filterChip = (key, val, label) => {
+    const active = state.practicesFilters[key] === val;
+    return `<button class="filter-chip ${active ? "is-active" : ""}" type="button" data-filter-key="${escapeHtml(key)}" data-filter-val="${escapeHtml(val)}">${escapeHtml(label)}</button>`;
+  };
+
+  const filtersMarkup = `
+    <div class="practices-filters">
+      <div class="practices-filters__group">
+        ${filterChip("type", "", "Все")}
+        ${Object.entries(PRACTICE_TYPES).map(([k, v]) => filterChip("type", k, v)).join("")}
+      </div>
+      <div class="practices-filters__group">
+        ${filterChip("duration", "", "Любая длина")}
+        ${Object.entries(PRACTICE_DURATIONS).map(([k, v]) => filterChip("duration", k, v.label)).join("")}
+      </div>
+      <div class="practices-filters__group">
+        ${filterChip("goal", "", "Любая цель")}
+        ${Object.entries(PRACTICE_GOALS).map(([k, v]) => filterChip("goal", k, v)).join("")}
+      </div>
+    </div>
+  `;
+
+  const listMarkup = practices.length
+    ? practices.map((p) => {
+        const tags = (p.tags || []).slice(0, 3).map((t) => `<span class="practice-tag">${escapeHtml(t)}</span>`).join("");
+        return `
+          <article class="practice-list-item" role="button" tabindex="0" data-open-practice="${escapeHtml(p.id)}">
+            ${p.image_url
+              ? `<div class="practice-list-item__img" style="background-image:url('${escapeHtml(p.image_url)}')"></div>`
+              : `<div class="practice-list-item__img practice-list-item__img--empty"></div>`}
+            <div class="practice-list-item__body">
+              <h3>${escapeHtml(p.title)}</h3>
+              ${p.description ? `<p>${escapeHtml(p.description)}</p>` : ""}
+              <div class="practice-list-item__footer">
+                ${p.duration_minutes ? `<span class="practice-meta">⏱ ${formatDuration(p.duration_minutes)}</span>` : ""}
+                ${p.level ? `<span class="practice-meta">${escapeHtml(p.level)}</span>` : ""}
+                ${tags}
+              </div>
+            </div>
+            ${p.video_url ? `<div class="practice-list-item__video-badge">▶</div>` : ""}
+          </article>
+        `;
+      }).join("")
+    : `<section class="placeholder-card"><h3>Практики не найдены</h3><p>Попробуйте изменить фильтры.</p></section>`;
+
+  appContent.innerHTML = `
+    <section class="tab-screen">
+      <header class="tab-header">
+        <div><h1>Практики</h1></div>
+        ${getAvatarMarkup(state.profile, state.session?.user)}
+      </header>
+      ${filtersMarkup}
+      <div class="practice-list">
+        ${listMarkup}
+      </div>
+    </section>
+  `;
+
+  appContent.querySelectorAll("[data-filter-key]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      state.practicesFilters[btn.dataset.filterKey] = btn.dataset.filterVal;
+      state.practicesState = "loading";
+      renderLoadingState("Загружаем практики…");
+      try {
+        state.practicesData = await loadPracticesData();
+        state.practicesState = "ready";
+      } catch {
+        state.practicesState = "error";
+      }
+      renderPracticesScreen();
+    });
+  });
+
+  appContent.querySelectorAll("[data-open-practice]").forEach((el) => {
+    el.addEventListener("click", () => openPractice(el.dataset.openPractice));
+    el.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") openPractice(el.dataset.openPractice); });
+  });
+
+  appContent.querySelector(".tab-header .avatar")?.addEventListener("click", () => {
+    switchTab("profile");
+  });
 }
 
 async function loadAdminData() {
@@ -2363,12 +2741,18 @@ function sanitizeAdminPayload(sectionName, formData) {
   }
 
   if (sectionName === "practices") {
+    const tagsRaw = formData.get("tags")?.toString().trim() || "";
+    const tags = tagsRaw ? tagsRaw.split(",").map((t) => t.trim()).filter(Boolean) : [];
     return {
       title: formData.get("title")?.toString().trim(),
-      subtitle: formData.get("subtitle")?.toString().trim() || null,
+      description: formData.get("description")?.toString().trim() || null,
+      type: formData.get("type")?.toString().trim() || null,
+      goal: formData.get("goal")?.toString().trim() || null,
+      tags: tags.length ? tags : null,
       duration_minutes: Number(formData.get("duration_minutes") || 0),
       level: formData.get("level")?.toString().trim() || null,
       image_url: formData.get("image_url")?.toString().trim() || null,
+      video_url: formData.get("video_url")?.toString().trim() || null,
       sort_order: Number(formData.get("sort_order") || 0),
       is_featured: formData.get("is_featured") === "on",
     };
