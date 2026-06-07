@@ -663,6 +663,7 @@ function closeReel() {
 
   state.activeReel = null;
   reelOverlay?.classList.add("is-hidden");
+  document.body.classList.remove("modal-open");
 
   if (reelVideo) {
     reelVideo.pause();
@@ -683,6 +684,7 @@ function openReel(category) {
   }
 
   state.activeReel = category;
+  document.body.classList.add("modal-open");
 
   if (reelTitle) {
     reelTitle.textContent = category.title || "Рилс";
