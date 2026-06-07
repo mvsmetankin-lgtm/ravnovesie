@@ -1549,6 +1549,7 @@ body.modal-open {
   position: fixed;
   inset: 0;
   z-index: 1000;
+  overflow: hidden;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1598,7 +1599,10 @@ body.modal-open {
 
 .reel-player__top {
   position: absolute;
-  inset: 18px 18px auto;
+  top: 18px;
+  left: 18px;
+  right: 18px;
+  width: calc(100% - 36px);
   display: grid;
   gap: 12px;
 }
