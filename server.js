@@ -449,7 +449,7 @@ async function getHomeFeed(userId) {
         .order("sort_order", { ascending: true }),
       supabaseAdmin
         .from("audio_banners")
-        .select("id, title, image_url, theme, sort_order, is_active")
+        .select("id, title, image_url, audio_url, theme, sort_order, is_active")
         .eq("is_active", true)
         .order("sort_order", { ascending: true }),
       getDiaryData(userId),

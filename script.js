@@ -265,6 +265,7 @@ const ADMIN_SECTIONS = {
       { name: "title", label: "Название", type: "text", required: true },
       { name: "theme", label: "Тема", type: "text" },
       { name: "image_url", label: "Изображение URL", type: "url" },
+      { name: "audio_url", label: "Аудио URL (mp3/ogg)", type: "url" },
       { name: "sort_order", label: "Порядок", type: "number" },
       { name: "is_active", label: "Активно", type: "checkbox" },
     ],
@@ -2002,13 +2003,15 @@ function renderHomeScreen(data) {
         .slice(0, 2)
         .map((item, index) => {
           const warmClass = index % 2 === 1 ? "banner-card--warm" : "";
+          const hasAudio = !!item.audio_url;
           return `
-            <article class="banner-card ${warmClass}">
+            <article class="banner-card ${warmClass} ${hasAudio ? "has-audio" : ""}"
+              ${hasAudio ? `role="button" tabindex="0" data-audio-url="${escapeHtml(item.audio_url)}" data-audio-title="${escapeHtml(item.title)}"` : ""}>
               ${buildImageMarkup(item.image_url, item.title)}
               <div class="banner-card__content">
                 <h3>${escapeHtml(item.title)}</h3>
               </div>
-              <div class="banner-card__play">▶</div>
+              <div class="banner-card__play">${hasAudio ? "▶" : ""}</div>
             </article>
           `;
         })
@@ -2113,6 +2116,20 @@ function renderHomeScreen(data) {
         event.preventDefault();
         openReel(category);
       }
+    });
+  });
+
+  // Banner audio click handlers
+  const bannerCards = appContent.querySelectorAll(".banner-card.has-audio");
+  bannerCards.forEach((card) => {
+    const handler = () => {
+      const audioUrl = card.dataset.audioUrl;
+      const title = card.dataset.audioTitle || "Аудио";
+      if (audioUrl) openMiniPlayer(audioUrl, title);
+    };
+    card.addEventListener("click", handler);
+    card.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handler(); }
     });
   });
 }
@@ -2782,6 +2799,7 @@ function sanitizeAdminPayload(sectionName, formData) {
       title: formData.get("title")?.toString().trim(),
       theme: formData.get("theme")?.toString().trim() || null,
       image_url: formData.get("image_url")?.toString().trim() || null,
+      audio_url: formData.get("audio_url")?.toString().trim() || null,
       sort_order: Number(formData.get("sort_order") || 0),
       is_active: formData.get("is_active") === "on",
     };
@@ -3731,6 +3749,64 @@ supabaseClient.auth.onAuthStateChange(async (event, session) => {
     }
   }
 });
+
+// ─── Mini Audio Player ────────────────────────────────────────────────────────
+const miniPlayerEl   = document.getElementById("miniPlayer");
+const miniPlayerTitle = document.getElementById("miniPlayerTitle");
+const miniPlayerToggle = document.getElementById("miniPlayerToggle");
+const miniPlayerClose  = document.getElementById("miniPlayerClose");
+const globalAudio      = document.getElementById("globalAudio");
+
+function openMiniPlayer(url, title) {
+  if (!miniPlayerEl || !globalAudio) return;
+  globalAudio.pause();
+  globalAudio.src = url;
+  miniPlayerTitle.textContent = title;
+  miniPlayerEl.classList.remove("is-hidden");
+  setMiniPlayerPlaying(false);
+  globalAudio.play().then(() => setMiniPlayerPlaying(true)).catch(() => {});
+}
+
+function setMiniPlayerPlaying(playing) {
+  const iconPlay  = miniPlayerToggle?.querySelector(".mini-player__icon-play");
+  const iconPause = miniPlayerToggle?.querySelector(".mini-player__icon-pause");
+  if (!iconPlay || !iconPause) return;
+  if (playing) {
+    iconPlay.classList.add("is-hidden");
+    iconPause.classList.remove("is-hidden");
+  } else {
+    iconPlay.classList.remove("is-hidden");
+    iconPause.classList.add("is-hidden");
+  }
+}
+
+if (miniPlayerToggle) {
+  miniPlayerToggle.addEventListener("click", () => {
+    if (!globalAudio) return;
+    if (globalAudio.paused) {
+      globalAudio.play().then(() => setMiniPlayerPlaying(true)).catch(() => {});
+    } else {
+      globalAudio.pause();
+      setMiniPlayerPlaying(false);
+    }
+  });
+}
+
+if (miniPlayerClose) {
+  miniPlayerClose.addEventListener("click", () => {
+    globalAudio?.pause();
+    if (globalAudio) globalAudio.src = "";
+    miniPlayerEl?.classList.add("is-hidden");
+    setMiniPlayerPlaying(false);
+  });
+}
+
+if (globalAudio) {
+  globalAudio.addEventListener("play",  () => setMiniPlayerPlaying(true));
+  globalAudio.addEventListener("pause", () => setMiniPlayerPlaying(false));
+  globalAudio.addEventListener("ended", () => setMiniPlayerPlaying(false));
+}
+// ─────────────────────────────────────────────────────────────────────────────
 
 async function bootstrap() {
   setActiveAuthScreen("login");
