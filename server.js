@@ -5,6 +5,9 @@ import path from "node:path";
 import express from "express";
 import { fileURLToPath } from "node:url";
 import { createClient } from "@supabase/supabase-js";
+import { Agent as UndiciAgent } from "undici";
+
+const gigachatDispatcher = new UndiciAgent({ connect: { rejectUnauthorized: false } });
 
 const {
   PORT = "3001",
@@ -818,6 +821,7 @@ async function getGigaChatAccessToken() {
     body: new URLSearchParams({
       scope: GIGACHAT_SCOPE,
     }),
+    dispatcher: gigachatDispatcher,
   });
 
   const payload = await response.json().catch(() => ({}));
@@ -906,6 +910,7 @@ async function sendChatViaGigaChat(messages, systemPrompt = CHAT_SYSTEM_PROMPT) 
           ...messages,
         ],
       }),
+      dispatcher: gigachatDispatcher,
     });
 
     const payload = await response.json().catch(() => ({}));
