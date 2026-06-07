@@ -2524,25 +2524,26 @@ function renderPracticesScreen() {
   const practices = state.practicesData || [];
   const { type, goal, duration } = state.practicesFilters;
 
-  const filterChip = (key, val, label) => {
-    const active = state.practicesFilters[key] === val;
-    return `<button class="filter-chip ${active ? "is-active" : ""}" type="button" data-filter-key="${escapeHtml(key)}" data-filter-val="${escapeHtml(val)}">${escapeHtml(label)}</button>`;
+  const filterSelect = (key, placeholder, options) => {
+    const val = state.practicesFilters[key];
+    return `
+      <div class="practices-filter-wrap">
+        <select class="practices-filter-select" data-filter-key="${escapeHtml(key)}">
+          <option value="">${escapeHtml(placeholder)}</option>
+          ${options.map(([k, v]) => `<option value="${escapeHtml(k)}" ${val === k ? "selected" : ""}>${escapeHtml(v)}</option>`).join("")}
+        </select>
+        <span class="practices-filter-select__arrow">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </span>
+      </div>
+    `;
   };
 
   const filtersMarkup = `
     <div class="practices-filters">
-      <div class="practices-filters__group">
-        ${filterChip("type", "", "Все")}
-        ${Object.entries(PRACTICE_TYPES).map(([k, v]) => filterChip("type", k, v)).join("")}
-      </div>
-      <div class="practices-filters__group">
-        ${filterChip("duration", "", "Любая длина")}
-        ${Object.entries(PRACTICE_DURATIONS).map(([k, v]) => filterChip("duration", k, v.label)).join("")}
-      </div>
-      <div class="practices-filters__group">
-        ${filterChip("goal", "", "Любая цель")}
-        ${Object.entries(PRACTICE_GOALS).map(([k, v]) => filterChip("goal", k, v)).join("")}
-      </div>
+      ${filterSelect("type", "Все типы", Object.entries(PRACTICE_TYPES))}
+      ${filterSelect("duration", "Любая длина", Object.entries(PRACTICE_DURATIONS).map(([k, v]) => [k, v.label]))}
+      ${filterSelect("goal", "Любая цель", Object.entries(PRACTICE_GOALS))}
     </div>
   `;
 
@@ -2582,9 +2583,9 @@ function renderPracticesScreen() {
     </section>
   `;
 
-  appContent.querySelectorAll("[data-filter-key]").forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      state.practicesFilters[btn.dataset.filterKey] = btn.dataset.filterVal;
+  appContent.querySelectorAll("[data-filter-key]").forEach((sel) => {
+    sel.addEventListener("change", async () => {
+      state.practicesFilters[sel.dataset.filterKey] = sel.value;
       state.practicesState = "loading";
       renderLoadingState("Загружаем практики…");
       try {

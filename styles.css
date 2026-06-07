@@ -1020,14 +1020,42 @@ body.modal-open {
   font-size: 13px;
 }
 
-.admin-field input {
+.admin-field input,
+.admin-field textarea,
+.admin-field select {
   width: 100%;
   padding: 13px 14px;
   border-radius: 14px;
   border: 1px solid rgba(75, 140, 255, 0.14);
   background: #fff;
   color: var(--text);
+  font: inherit;
+  font-size: 14px;
   outline: none;
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+
+.admin-field input:focus,
+.admin-field textarea:focus,
+.admin-field select:focus {
+  border-color: rgba(75, 140, 255, 0.55);
+  box-shadow: 0 0 0 3px rgba(75, 140, 255, 0.1);
+}
+
+.admin-field textarea {
+  resize: vertical;
+  min-height: 80px;
+  line-height: 1.5;
+}
+
+.admin-field select {
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg width='14' height='14' viewBox='0 0 24 24' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M6 9l6 6 6-6' stroke='%237f8ca7' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+  padding-right: 40px;
+  cursor: pointer;
 }
 
 .admin-checkbox {
@@ -2299,36 +2327,49 @@ body.modal-open {
 
 /* ── Practices screen ─────────────────────────── */
 .practices-filters {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
 }
 
-.practices-filters__group {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
+.practices-filter-wrap {
+  position: relative;
 }
 
-.filter-chip {
-  display: inline-flex;
-  align-items: center;
-  padding: 6px 14px;
-  border-radius: 999px;
-  border: 1.5px solid rgba(75, 140, 255, 0.2);
-  background: rgba(255, 255, 255, 0.9);
-  color: var(--text-muted);
-  font-size: 12px;
+.practices-filter-select {
+  width: 100%;
+  padding: 10px 32px 10px 14px;
+  border-radius: 14px;
+  border: 1.5px solid rgba(75, 140, 255, 0.18);
+  background: rgba(255, 255, 255, 0.95);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
   font-weight: 600;
+  appearance: none;
+  -webkit-appearance: none;
+  outline: none;
   cursor: pointer;
-  transition: background 140ms ease, color 140ms ease, border-color 140ms ease;
+  transition: border-color 150ms ease, box-shadow 150ms ease;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.filter-chip.is-active {
-  background: var(--accent);
+.practices-filter-select:focus {
   border-color: var(--accent);
-  color: #fff;
+  box-shadow: 0 0 0 3px rgba(75, 140, 255, 0.12);
+}
+
+.practices-filter-select__arrow {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
 }
 
 .practice-list {
