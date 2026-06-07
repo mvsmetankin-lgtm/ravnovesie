@@ -448,20 +448,11 @@ button {
 }
 
 .app-topbar__signals {
-  display: flex;
-  align-items: center;
-  gap: 10px;
+  display: none;
 }
 
 .app-topbar__signal {
-  width: 54px;
-  height: 8px;
-  border-radius: 999px;
-  background: rgba(31, 42, 68, 0.12);
-}
-
-.app-topbar__signal--dots {
-  width: 28px;
+  display: none;
 }
 
 .app-topbar__mode-button {
