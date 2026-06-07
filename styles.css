@@ -2327,13 +2327,15 @@ body.modal-open {
 
 /* ── Practices screen ─────────────────────────── */
 .practices-filters {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
 .practices-filter-wrap {
   position: relative;
+  flex: 1 1 120px;
+  min-width: 100px;
 }
 
 .practices-filter-select {
